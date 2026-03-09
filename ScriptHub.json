@@ -12,6 +12,6 @@
   "Anti VC Bypass": {
     "Script": "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/Just3itx/AntiCheat/refs/heads/main/Script\"))()",
     "Image": "https://rscripts.net/_next/image?url=%2Fassets%2Fscripts%2F69a1073a3f143b49d1fb96f7_1772160827037_A94U0SULnd_0.webp&w=640&q=75",
-    "Description": "Infinite Yield is an open-source admin commands script"
+    "Description": "Anti suspension script prevent you to get voice chat ban!"
   }
 }
