@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "cBK10pRayK4=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Liuzh\\OneDrive\\Desktop\\Projects\\Personal UI\\3itx-installer\\3itx-installer.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Liuzh\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.24\\microsoft.net.illink.tasks.8.0.24.nupkg.sha512",
+    "C:\\Users\\Liuzh\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.24\\microsoft.netcore.app.runtime.win-x64.8.0.24.nupkg.sha512",
+    "C:\\Users\\Liuzh\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.24\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.24.nupkg.sha512",
+    "C:\\Users\\Liuzh\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.24\\microsoft.aspnetcore.app.runtime.win-x64.8.0.24.nupkg.sha512"
+  ],
+  "logs": []
+}
