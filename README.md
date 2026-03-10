@@ -1,1 +1,3 @@
-This UI is made by AI | I am too lazy to do it so enjoy with the source thanks!
+This is a UI made with Next.js and CSharp 
+
+I recommand if you use the isntaller to set this up to save you time anyways hope you enjoy !
