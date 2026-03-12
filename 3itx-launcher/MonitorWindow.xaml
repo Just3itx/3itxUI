@@ -1,0 +1,93 @@
+<Window x:Class="_3itx_launcher.MonitorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Monitor"
+        Width="480" Height="340"
+        MinWidth="260" MinHeight="180"
+        WindowStyle="None"
+        Background="#0a0a0c"
+        ResizeMode="CanResize"
+        ShowInTaskbar="false"
+        Topmost="True"
+        AllowsTransparency="True">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0"
+                      CornerRadius="8" />
+    </WindowChrome.WindowChrome>
+
+    <Border CornerRadius="8" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="28" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Title Bar -->
+            <Grid Grid.Row="0" Background="#0c0c0e"
+                  MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Status dot + title -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <Ellipse Width="6" Height="6" Fill="#22c55e" Margin="0,0,6,0" />
+                    <TextBlock x:Name="TitleText"
+                               Text="Monitor"
+                               FontFamily="Segoe UI"
+                               FontSize="10"
+                               Foreground="#a1a1aa"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- FPS counter -->
+                <TextBlock Grid.Column="1" x:Name="FpsText"
+                           Text=""
+                           FontFamily="Segoe UI Semibold"
+                           FontSize="9"
+                           Foreground="#52525b"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           Margin="0,0,6,0" />
+
+                <!-- Uncap FPS toggle -->
+                <Button x:Name="UncapBtn" Grid.Column="2" Click="Uncap_Click"
+                        Height="20" Padding="6,0"
+                        Background="Transparent" BorderBrush="#28FFFFFF" BorderThickness="1"
+                        Foreground="#52525b" Cursor="Arrow" Margin="0,0,4,0"
+                        FontFamily="Segoe UI" FontSize="9" Content="Uncap"
+                        VerticalAlignment="Center"/>
+
+                <!-- Close button -->
+                <Button Grid.Column="3" Click="Close_Click"
+                        Width="32" Height="28"
+                        Background="Transparent" BorderThickness="0"
+                        Foreground="#71717a" Cursor="Arrow">
+                    <Path Data="M0,0 L7,7 M7,0 L0,7" Stroke="#71717a" StrokeThickness="1" />
+                </Button>
+            </Grid>
+
+            <!-- Border under title -->
+            <Border Grid.Row="0" VerticalAlignment="Bottom"
+                    Height="1" Background="#1a1a1e" />
+
+            <!-- Image -->
+            <Image x:Name="CaptureImage" Grid.Row="1"
+                   Stretch="Uniform"
+                   RenderOptions.BitmapScalingMode="LowQuality" />
+
+            <!-- Loading overlay -->
+            <TextBlock x:Name="LoadingText" Grid.Row="1"
+                       Text="Waiting for capture..."
+                       FontFamily="Segoe UI" FontSize="10"
+                       Foreground="#52525b"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Grid>
+    </Border>
+</Window>
