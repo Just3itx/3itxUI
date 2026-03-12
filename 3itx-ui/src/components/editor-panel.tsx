@@ -395,6 +395,7 @@ function registerLuauCompletions(monaco: Monaco) {
 
     // â”€â”€ 1. Global completions (non-dot) â”€â”€
     _completionDisposables.push(monaco.languages.registerCompletionItemProvider("luau", {
+        triggerCharacters: ["(", ",", " ", "="],
         provideCompletionItems: (model: monacoType.editor.ITextModel, position: monacoType.Position) => {
             const lineContent = model.getLineContent(position.lineNumber);
             if (isInsideStringOrComment(lineContent, position.column)) return { suggestions: [] };
