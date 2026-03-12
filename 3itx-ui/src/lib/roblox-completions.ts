@@ -40197,7 +40197,7 @@ export const ROBLOX_CLASSES: RobloxClass[] = [
         ]
     },
     {
-        "name": "VoltConnection",
+        "name": "SignalConnection",
         "parent": null,
         "members": [
             {
@@ -40285,7 +40285,7 @@ export const ROBLOX_CLASSES: RobloxClass[] = [
         ]
     },
     {
-        "name": "VoltWebSocketClient",
+        "name": "ExecutorWebSocketClient",
         "parent": null,
         "members": [
             {
@@ -40296,12 +40296,12 @@ export const ROBLOX_CLASSES: RobloxClass[] = [
             {
                 "name": "OnMessage",
                 "kind": "property",
-                "detail": ": VoltSignal<string>"
+                "detail": ": ExecutorSignal<string>"
             },
             {
                 "name": "OnClose",
                 "kind": "property",
-                "detail": ": VoltSignal<()>"
+                "detail": ": ExecutorSignal<()>"
             },
             {
                 "name": "Send",
@@ -40332,7 +40332,7 @@ export const ROBLOX_CLASSES: RobloxClass[] = [
             {
                 "name": "Event",
                 "kind": "property",
-                "detail": ": VoltSignal<>"
+                "detail": ": ExecutorSignal<>"
             },
             {
                 "name": "GetActors",
