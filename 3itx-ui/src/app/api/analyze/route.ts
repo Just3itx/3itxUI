@@ -55,9 +55,13 @@ function parseDiagnostics(output: string): DiagnosticResult[] {
             const startLine = parseInt(match[1], 10);
             const startCol = parseInt(match[2], 10);
             const endLine = match[3] ? parseInt(match[3], 10) : startLine;
-            const endCol = match[4] ? parseInt(match[4], 10) : startCol + 1;
+            const endCol = match[4] ? parseInt(match[4], 10) : 999;
             const severity = match[5];
             const message = match[6].trim();
+
+            // Only show actual errors (TypeError, SyntaxError), skip lint warnings
+            const sevLower = severity.toLowerCase();
+            if (!sevLower.includes("error") && !sevLower.includes("type")) continue;
 
             results.push({
                 line: startLine,

@@ -341,3 +341,12 @@ export async function showJoinNotification(params: {
     }
     return false;
 }
+
+/** Capture a screenshot of a Roblox window by PID */
+export async function captureWindow(pid: number): Promise<string | null> {
+    if (isWebView2()) {
+        const data = await send({ action: "captureWindow", pid });
+        return data?.image ?? null;
+    }
+    return null;
+}

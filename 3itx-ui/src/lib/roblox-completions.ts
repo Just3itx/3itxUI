@@ -1580,7 +1580,7 @@ export interface RobloxMember {
 
 export interface RobloxClass {
     name: string;
-    parent?: string;
+    parent?: string | null;
     members: RobloxMember[];
 }
 
