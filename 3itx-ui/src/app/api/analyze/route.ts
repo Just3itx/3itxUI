@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execFile } from "child_process";
+import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -23,7 +23,6 @@ function getDefinitionsPath() {
 }
 
 function getGlobalTypesPath() {
-    // globalTypes.d.lua is in the 3itx-ui project root
     const projectRoot = path.resolve(process.cwd());
     return path.join(projectRoot, "globalTypes.d.lua");
 }
@@ -43,15 +42,12 @@ function parseDiagnostics(output: string): DiagnosticResult[] {
     const lines = output.split("\n");
 
     for (const line of lines) {
-        // Skip non-diagnostic lines (info messages, blank lines)
         if (!line.trim()) continue;
         if (line.startsWith("[INFO]") || line.startsWith("[WARN]")) continue;
         if (!line.includes("): ")) continue;
 
-        // Match patterns like:
-        // path/file.luau(2,1): TypeError: message
-        // path/file.luau(2,1-2,14): TypeError: message
-        // path/file.luau(1,7): LocalUnused: Variable 'x' is never used...
+        // Match: path/file.luau(line,col): Category: message
+        // Or:    path/file.luau(line,col-endline,endcol): Category: message
         const match = line.match(
             /\((\d+),(\d+)(?:-(\d+),(\d+))?\):\s*(\w+):\s*(.+)$/
         );
@@ -100,19 +96,16 @@ export async function POST(req: NextRequest) {
         // Build args
         const args: string[] = ["analyze", "--no-strict-dm-types"];
 
-        // Add globalTypes definitions (Roblox API types)
         const globalTypes = getGlobalTypesPath();
         if (fs.existsSync(globalTypes)) {
             args.push(`--definitions=@roblox=${globalTypes}`);
         }
 
-        // Add executor definitions (UNC functions)
         const execDefs = getDefinitionsPath();
         if (fs.existsSync(execDefs)) {
             args.push(`--definitions=@executor=${execDefs}`);
         }
 
-        // Add .luaurc base config if it exists
         const luaurc = path.join(dataPath, ".luaurc");
         if (fs.existsSync(luaurc)) {
             args.push(`--base-luaurc=${luaurc}`);
@@ -120,24 +113,20 @@ export async function POST(req: NextRequest) {
 
         args.push(tempFile);
 
-        // Run luau-lsp analyze
+        // Use spawn instead of execFile to reliably capture all output
         const diagnostics = await new Promise<DiagnosticResult[]>((resolve) => {
-            execFile(lspExe, args, { timeout: 10000, maxBuffer: 1024 * 512 }, (error, stdout, stderr) => {
-                // luau-lsp analyze returns exit code 1 when it finds errors
-                // Diagnostics go to stderr, so we need to capture ALL output
-                let allOutput = "";
-                if (stderr) allOutput += stderr;
-                if (stdout) allOutput += stdout;
-                // When execFile reports an error with code 1, stderr might be in error.stderr
-                if (error && (error as any).stderr) {
-                    allOutput += (error as any).stderr;
-                }
-                // Also check error.stdout
-                if (error && (error as any).stdout) {
-                    allOutput += (error as any).stdout;
-                }
+            const proc = spawn(lspExe, args, { timeout: 10000 });
+            let allOutput = "";
 
+            proc.stdout.on("data", (data) => { allOutput += data.toString(); });
+            proc.stderr.on("data", (data) => { allOutput += data.toString(); });
+
+            proc.on("close", () => {
                 resolve(parseDiagnostics(allOutput));
+            });
+
+            proc.on("error", () => {
+                resolve([]);
             });
         });
 
