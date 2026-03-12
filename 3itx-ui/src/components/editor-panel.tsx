@@ -868,13 +868,22 @@ export default function EditorPanel({
         registerLuauDiagnostics(editor, monaco);
 
         // Use onDidChangeModelContent instead of controlled value prop
-        editor.onDidChangeModelContent(() => {
+        editor.onDidChangeModelContent((e) => {
             const value = editor.getValue();
             // Debounce the state update to avoid excessive re-renders during fast typing
             if (contentChangeTimerRef.current) clearTimeout(contentChangeTimerRef.current);
             contentChangeTimerRef.current = setTimeout(() => {
                 onContentChange(activeTabIdRef.current, value);
             }, 50); // 50ms debounce — fast enough for UI, avoids storm
+
+            // Auto-trigger suggestions when typing or deleting inside a word
+            const pos = editor.getPosition();
+            if (pos) {
+                const word = editor.getModel()?.getWordAtPosition(pos);
+                if (word && word.word.length >= 1) {
+                    editor.trigger("auto", "editor.action.triggerSuggest", {});
+                }
+            }
         });
     }, [onContentChange]);
 
