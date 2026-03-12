@@ -746,7 +746,7 @@ function registerLuauDiagnostics(editor: monacoType.editor.IStandaloneCodeEditor
         _diagTimer = setTimeout(() => {
             const model = editor.getModel();
             if (model) validateLuau(model, monaco);
-        }, 500); // 500ms debounce for analyze calls
+        }, 100); // 100ms debounce for analyze calls
     };
 
     editor.onDidChangeModelContent(runDiag);
