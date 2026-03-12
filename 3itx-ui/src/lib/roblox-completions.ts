@@ -1470,7 +1470,97 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
         "label": "WebSocket.connect",
         "detail": "(url: string) → WebSocket",
         "doc": "Connects to a WebSocket server"
-    }
+    },
+    /* ─── Additional UNC / Synapse X V3 functions ─── */
+    // Environment
+    { "label": "filtergc", "detail": "(type: string, options: table, returnOne?: boolean) → any", "doc": "Searches GC for values matching criteria" },
+    // Hooking
+    { "label": "clonefunction", "detail": "(fn: function) → function", "doc": "Clones a function" },
+    { "label": "hookproto", "detail": "(proto: ProtoProxy, hook: function) → nil", "doc": "Hooks a Lua function prototype" },
+    { "label": "restorefunction", "detail": "(fn: function) → nil", "doc": "Restores a hooked function" },
+    { "label": "restoreproto", "detail": "(proto: ProtoProxy) → nil", "doc": "Restores a hooked proto" },
+    { "label": "isfunctionhooked", "detail": "(fn: function) → boolean", "doc": "Returns whether a function is hooked" },
+    { "label": "setstackhidden", "detail": "(fn: function | number, hidden?: boolean) → nil", "doc": "Hides a function from the callstack" },
+    { "label": "hooksignal", "detail": "(signal: ScriptSignal, callback: function) → nil", "doc": "Hooks a signal to intercept invocations" },
+    { "label": "restoresignal", "detail": "(signal: ScriptSignal) → nil", "doc": "Unhooks a hooked signal" },
+    { "label": "issignalhooked", "detail": "(signal: ScriptSignal) → boolean", "doc": "Returns whether a signal is hooked" },
+    // Filter
+    { "label": "getfilter", "detail": "() → Filter", "doc": "Returns a new Filter object for use with hookfunction" },
+    // Filesystem (async variants)
+    { "label": "readfileasync", "detail": "(path: string) → string [yields]", "doc": "Reads a file asynchronously" },
+    { "label": "writefileasync", "detail": "(path: string, contents: string) → nil [yields]", "doc": "Writes a file asynchronously" },
+    { "label": "appendfileasync", "detail": "(path: string, contents: string) → nil [yields]", "doc": "Appends to a file asynchronously" },
+    { "label": "loadfileasync", "detail": "(path: string) → function [yields]", "doc": "Loads a file as function asynchronously" },
+    { "label": "getsynasset", "detail": "(path: string) → string", "doc": "Returns a Content string for workspace assets" },
+    { "label": "saveplace", "detail": "(options?: table) → boolean [yields]", "doc": "Saves the game, equivalent to saveinstance(game)" },
+    // Reflection
+    { "label": "setscriptable", "detail": "(instance: Instance, property: string, scriptable: boolean) → boolean", "doc": "Sets a property's scriptable flag, returns original" },
+    { "label": "getproperties", "detail": "(instance: Instance) → table", "doc": "Returns all property values including non-scriptable" },
+    { "label": "gethiddenproperties", "detail": "(instance: Instance) → table", "doc": "Returns all non-scriptable property values" },
+    { "label": "getpcdprop", "detail": "(instance: TriangleMeshPart) → string, string", "doc": "Returns PhysicalConfigData property" },
+    { "label": "getcallbackmember", "detail": "(instance: Instance, property: string, raw?: boolean) → any", "doc": "Returns a callback property value" },
+    { "label": "geteventmember", "detail": "(instance: Instance, eventName: string) → ScriptSignal", "doc": "Creates unrestricted signal for any event" },
+    { "label": "getrendersteppedlist", "detail": "() → table", "doc": "Returns all RenderStepped bound callbacks" },
+    // Script
+    { "label": "issynapsefunction", "detail": "(fn: function) → boolean", "doc": "Returns whether function is from Synapse" },
+    { "label": "getscriptthread", "detail": "(script: Instance) → thread", "doc": "Returns the main thread of a script" },
+    { "label": "getsenv", "detail": "(script: Instance) → table", "doc": "Returns the environment of a script" },
+    { "label": "getscriptfunction", "detail": "(script: Instance) → function", "doc": "Returns the main function of a script" },
+    { "label": "getfunctionhash", "detail": "(fn: function) → string", "doc": "Returns bytecode hash of a function" },
+    { "label": "getscriptname", "detail": "(script: Instance) → string", "doc": "Returns original name of a script" },
+    { "label": "dumpbytecode", "detail": "(target: function | Instance) → string", "doc": "Dumps bytecode in Luau format" },
+    { "label": "getcallingscript", "detail": "() → Instance?", "doc": "Returns the script associated with current thread" },
+    { "label": "issynapsethread", "detail": "(thread: thread) → boolean", "doc": "Returns whether thread is owned by Synapse" },
+    { "label": "setsynapsethread", "detail": "(set: boolean, thread?: thread) → nil", "doc": "Changes whether thread passes checkcaller" },
+    // Signal
+    { "label": "cfiresignal", "detail": "(signal: ScriptSignal, ...args) → nil", "doc": "Fires signal on C/engine connections" },
+    { "label": "cansignalreplicate", "detail": "(signal: ScriptSignal) → boolean", "doc": "Returns whether a signal can replicate" },
+    { "label": "getsignalarguments", "detail": "(signal: ScriptSignal) → table", "doc": "Returns expected argument info for a signal" },
+    { "label": "isconnectionenabled", "detail": "(connection: Connection) → boolean", "doc": "Returns whether a connection is enabled" },
+    { "label": "setconnectionenabled", "detail": "(connection: Connection, enabled: boolean) → nil", "doc": "Enables/disables a connection" },
+    { "label": "isluaconnection", "detail": "(connection: Connection) → boolean", "doc": "Returns whether connection is a Lua connection" },
+    { "label": "iswaitingconnection", "detail": "(connection: Connection) → boolean", "doc": "Returns whether connection is a waiting connection" },
+    { "label": "getconnectionfunction", "detail": "(connection: Connection) → function", "doc": "Returns the function of a connection" },
+    { "label": "getconnectionthread", "detail": "(connection: Connection) → thread", "doc": "Returns the thread of a waiting connection" },
+    { "label": "isgamescriptconnection", "detail": "(connection: Connection) → boolean", "doc": "Returns whether connection belongs to a game script" },
+    // Misc
+    { "label": "unlockmodulescript", "detail": "(module: ModuleScript) → nil", "doc": "Unlocks a ModuleScript for cross-context require" },
+    { "label": "newtable", "detail": "(narray: number, nhash: number) → table", "doc": "Creates a table with specified sizes filled with random data" },
+    { "label": "setwindowtitle", "detail": "(text: string) → nil", "doc": "Sets the Roblox window title" },
+    { "label": "setwindowicon", "detail": "(data: string?) → nil", "doc": "Sets the Roblox window icon" },
+    { "label": "createuitab", "detail": "(title: string, contents: string, icon?: string) → nil", "doc": "Creates a tab in the external UI" },
+    // Table
+    { "label": "setuntouched", "detail": "(table: table, untouched: boolean) → nil", "doc": "Sets untouched flag on a table" },
+    { "label": "isuntouched", "detail": "(table: table) → boolean", "doc": "Returns whether a table is untouched" },
+    { "label": "makewritable", "detail": "(table: table) → nil", "doc": "Makes a table writable" },
+    { "label": "makereadonly", "detail": "(table: table) → nil", "doc": "Makes a table read-only" },
+    { "label": "isprotected", "detail": "(table: table) → boolean", "doc": "Returns whether a table is protected" },
+    // Input (additional)
+    { "label": "keyclick", "detail": "(keyCode: number) → nil", "doc": "Simulates a key click (press + release)" },
+    { "label": "iskeydown", "detail": "(keyCode: number) → boolean", "doc": "Returns whether a key is pressed" },
+    { "label": "iskeytoggled", "detail": "(keyCode: number) → boolean", "doc": "Returns whether a toggle key is active" },
+    { "label": "lockwindow", "detail": "() → nil", "doc": "Locks the mouse to the window" },
+    { "label": "unlockwindow", "detail": "() → nil", "doc": "Unlocks the mouse from the window" },
+    { "label": "iswindowlocked", "detail": "() → boolean", "doc": "Returns whether the window is locked" },
+    { "label": "getmousestate", "detail": "() → table", "doc": "Returns the current mouse state" },
+    { "label": "setmousestate", "detail": "(state: table) → nil", "doc": "Sets the mouse state" },
+    // syn.* namespace
+    { "label": "syn.queue_on_teleport", "detail": "(script: string) → nil", "doc": "Queues script to execute after teleport" },
+    { "label": "syn.clear_teleport_queue", "detail": "() → nil", "doc": "Clears the teleport queue" },
+    { "label": "syn.get_thread_identity", "detail": "() → number", "doc": "Returns current thread context level" },
+    { "label": "syn.set_thread_identity", "detail": "(identity: number) → nil", "doc": "Sets current thread context level" },
+    { "label": "syn.protect_gui", "detail": "(target: Instance) → nil", "doc": "Protects a GUI (deprecated, use gethui)" },
+    { "label": "syn.unprotect_gui", "detail": "(target: Instance) → nil", "doc": "Unprotects a GUI (deprecated)" },
+    { "label": "syn.trampoline_call", "detail": "(target: function, callStack: table, threadOptions: table, ...args) → boolean, ...any", "doc": "Proxies a call with custom call stack and thread options" },
+    { "label": "syn.toast_notification", "detail": "(options: table) → nil", "doc": "Displays a toast notification in the UI" },
+    { "label": "syn.ipc_send", "detail": "(data: any) → nil", "doc": "Sends data to the UI" },
+    { "label": "syn.oth.hook", "detail": "(target: function, hook: function) → function", "doc": "Secure hookfunction for C functions using separate threads" },
+    { "label": "syn.oth.unhook", "detail": "(target: function, hookOrCallback?: function) → boolean", "doc": "Unhooks a syn.oth.hook" },
+    { "label": "syn.oth.get_root_callback", "detail": "() → function", "doc": "Gets the root callback in OTH context" },
+    { "label": "syn.oth.is_hook_thread", "detail": "() → boolean", "doc": "Returns whether current thread is a hook thread" },
+    { "label": "syn.oth.get_original_thread", "detail": "() → thread", "doc": "Gets the original thread in OTH context" },
+    // Network
+    { "label": "getfpscap", "detail": "() → number", "doc": "Returns current FPS cap" }
 ];
 
 /* ─── Class data for dot-completion ─── */
