@@ -1,43 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Globe, Server, Hash, X } from "lucide-react";
-
-/* ─── Country code → flag emoji ─── */
-function countryFlag(code: string): string {
-    if (!code || code.length !== 2) return "🌐";
-    const offset = 0x1F1E6;
-    return String.fromCodePoint(
-        code.charCodeAt(0) - 65 + offset,
-        code.charCodeAt(1) - 65 + offset
-    );
-}
-
-/* ─── Region label ─── */
-function regionLabel(region: string): string {
-    const map: Record<string, string> = {
-        "us-central": "US Central",
-        "us-east": "US East",
-        "us-west": "US West",
-        "eu-central": "EU Central",
-        "eu-west": "EU West",
-        "ap-southeast": "Asia Pacific SE",
-        "ap-northeast": "Asia Pacific NE",
-        "sa-east": "South America",
-    };
-    return map[region] || region || "Unknown";
-}
+import { Hash, X } from "lucide-react";
 
 /* ─── Types ─── */
 export interface JoinNotificationData {
     avatarUrl: string;
     displayName: string;
     username: string;
-    ip: string;
-    port: number;
     jobId: string;
-    region: string;
-    countryCode: string;
 }
 
 interface JoinNotification extends JoinNotificationData {
@@ -88,7 +59,6 @@ function NotificationCard({
     };
 
     const n = notification;
-    const flag = countryFlag(n.countryCode?.toUpperCase());
     const shortJobId = n.jobId.length > 20 ? n.jobId.substring(0, 20) + "…" : n.jobId;
     const secondsLeft = Math.ceil((progress / 100) * duration);
 
@@ -130,14 +100,8 @@ function NotificationCard({
                 </button>
             </div>
 
-            {/* Server details */}
-            <div className="px-3 pb-2 space-y-1">
-                <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60">
-                    <Server className="w-3 h-3 text-emerald-400/60 shrink-0" />
-                    <span className="font-mono text-[9px] text-white/70 truncate">
-                        {n.ip}:{n.port}
-                    </span>
-                </div>
+            {/* Job ID */}
+            <div className="px-3 pb-2">
                 <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60">
                     <Hash className="w-3 h-3 text-purple-400/60 shrink-0" />
                     <span className="font-mono text-[9px] text-white/50 truncate" title={n.jobId}>
@@ -146,15 +110,8 @@ function NotificationCard({
                 </div>
             </div>
 
-            {/* Footer: region + timer */}
-            <div className="flex items-center justify-between px-3 py-1.5 border-t border-white/[0.06] bg-white/[0.02]">
-                <div className="flex items-center gap-1.5">
-                    <span className="text-[11px]">{flag}</span>
-                    <Globe className="w-3 h-3 text-blue-400/50" />
-                    <span className="text-[9px] text-muted-foreground/50">
-                        {regionLabel(n.region)}
-                    </span>
-                </div>
+            {/* Footer: timer */}
+            <div className="flex items-center justify-end px-3 py-1.5 border-t border-white/[0.06] bg-white/[0.02]">
                 <span className="text-[9px] font-mono text-muted-foreground/40 tabular-nums">
                     {secondsLeft}s
                 </span>

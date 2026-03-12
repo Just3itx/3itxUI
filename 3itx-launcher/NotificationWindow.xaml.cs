@@ -35,11 +35,7 @@ public partial class NotificationWindow : Window
         string displayName,
         string username,
         string avatarUrl,
-        string ip,
-        int port,
         string jobId,
-        string region,
-        string countryCode,
         int robloxPid,
         int durationSeconds = 5,
         long userId = 0)
@@ -55,11 +51,8 @@ public partial class NotificationWindow : Window
 
         DisplayNameText.Text = displayName;
         UsernameText.Text = $"@{username}";
-        IpText.Text = port > 0 ? $"{ip}:{port}" : (string.IsNullOrEmpty(ip) ? "Unknown" : ip);
         JobIdText.Text = string.IsNullOrEmpty(jobId) ? "N/A" : (jobId.Length > 24 ? jobId[..24] + "…" : jobId);
         TimerText.Text = $"{_duration}s";
-        FlagText.Text = string.IsNullOrEmpty(countryCode) ? "??" : countryCode.ToUpperInvariant();
-        RegionText.Text = string.IsNullOrEmpty(region) ? "Unknown" : region;
 
         // Load avatar — prefer userId for reliable CDN URL
         LoadAvatar(userId, avatarUrl);

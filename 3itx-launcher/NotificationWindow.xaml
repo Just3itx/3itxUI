@@ -60,33 +60,21 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Row 1: Server IP + JobId -->
+            <!-- Row 1: JobId -->
             <StackPanel Grid.Row="1" Margin="12,4,12,4">
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
-                    <TextBlock Text="IP" FontSize="8" FontWeight="Medium" FontFamily="Segoe UI"
-                               Foreground="#40FFFFFF" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="IpText" FontSize="10" FontFamily="Consolas"
-                               Foreground="#A1A1AA" VerticalAlignment="Center"/>
-                </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="ID" FontSize="8" FontWeight="Medium" FontFamily="Segoe UI"
                                Foreground="#40FFFFFF" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     <TextBlock x:Name="JobIdText" FontSize="9" FontFamily="Consolas"
-                               Foreground="#52525B" VerticalAlignment="Center"/>
+                               Foreground="#71717A" VerticalAlignment="Center"/>
                 </StackPanel>
             </StackPanel>
 
-            <!-- Row 2: Region footer -->
+            <!-- Row 2: Timer footer -->
             <Border Grid.Row="2" Padding="12,5" BorderBrush="#10FFFFFF" BorderThickness="0,1,0,0">
                 <Grid>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
-                        <Border Background="#12FFFFFF" CornerRadius="3" Padding="5,2">
-                            <TextBlock x:Name="FlagText" FontSize="8.5" FontWeight="Bold"
-                                       FontFamily="Consolas" Foreground="#A1A1AA"/>
-                        </Border>
-                        <TextBlock x:Name="RegionText" FontSize="9" FontFamily="Segoe UI"
-                                   Margin="8,0,0,0" Foreground="#5CFFFFFF" VerticalAlignment="Center"/>
-                    </StackPanel>
+                    <TextBlock Text="joined a server" FontSize="9" FontFamily="Segoe UI"
+                               Foreground="#40FFFFFF" HorizontalAlignment="Left" VerticalAlignment="Center"/>
                     <TextBlock x:Name="TimerText" FontSize="9" FontFamily="Consolas"
                                Foreground="#40FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                 </Grid>

@@ -215,35 +215,16 @@ export default function Home() {
             const prevJob = prevJobIds.current.get(c.pid);
             if (prevJob !== c.jobId) {
               prevJobIds.current.set(c.pid, c.jobId);
-              // New game join detected — probe for server info
-              const pid = c.pid;
-              const client = c;
-              (async () => {
-                try {
-                  const controller = new AbortController();
-                  const timeout = setTimeout(() => controller.abort(), 8000);
-                  const res = await fetch(`/api/servers/probe?placeId=${client.placeId}&jobId=${client.jobId}`, {
-                    signal: controller.signal,
-                  });
-                  clearTimeout(timeout);
-                  if (!res.ok) return;
-                  const data = await res.json();
-                  // Send to C# launcher for native WPF notification on Roblox's monitor
-                  fsBridge.showJoinNotification({
-                    avatarUrl: client.avatarUrl || `https://www.roblox.com/headshot-thumbnail/image?userId=${client.userId}&width=150&height=150&format=png`,
-                    displayName: client.displayName,
-                    username: client.username,
-                    ip: data.ip || "",
-                    port: data.port || 0,
-                    jobId: client.jobId,
-                    region: data.region || "",
-                    countryCode: data.countryCode || "",
-                    robloxPid: pid,
-                    userId: client.userId,
-                    duration: settingsRef.current.joinNotificationDuration || 5,
-                  });
-                } catch { /* ignore probe failures */ }
-              })();
+              // New game join detected — show notification
+              fsBridge.showJoinNotification({
+                avatarUrl: c.avatarUrl || `https://www.roblox.com/headshot-thumbnail/image?userId=${c.userId}&width=150&height=150&format=png`,
+                displayName: c.displayName,
+                username: c.username,
+                jobId: c.jobId,
+                robloxPid: c.pid,
+                userId: c.userId,
+                duration: settingsRef.current.joinNotificationDuration || 5,
+              });
             }
           } catch { /* ignore per-client errors */ }
         }

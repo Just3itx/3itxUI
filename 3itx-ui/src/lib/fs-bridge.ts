@@ -330,11 +330,7 @@ export async function showJoinNotification(params: {
     displayName: string;
     username: string;
     avatarUrl: string;
-    ip: string;
-    port: number;
     jobId: string;
-    region: string;
-    countryCode: string;
     robloxPid: number;
     userId: number;
     duration: number;

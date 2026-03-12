@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -866,11 +866,7 @@ end
                         var notifDisplayName = root.TryGetProperty("displayName", out var ndnP) ? ndnP.GetString() ?? "" : "";
                         var notifUsername = root.TryGetProperty("username", out var nunP) ? nunP.GetString() ?? "" : "";
                         var notifAvatarUrl = root.TryGetProperty("avatarUrl", out var naP) ? naP.GetString() ?? "" : "";
-                        var notifIp = root.TryGetProperty("ip", out var niP) ? niP.GetString() ?? "" : "";
-                        var notifPort = root.TryGetProperty("port", out var npP) ? npP.GetInt32() : 0;
                         var notifJobId = root.TryGetProperty("jobId", out var njP) ? njP.GetString() ?? "" : "";
-                        var notifRegion = root.TryGetProperty("region", out var nrP) ? nrP.GetString() ?? "" : "";
-                        var notifCountry = root.TryGetProperty("countryCode", out var ncP) ? ncP.GetString() ?? "" : "";
                         var notifDuration = root.TryGetProperty("duration", out var ndP) ? ndP.GetInt32() : 5;
                         var notifRobloxPid = root.TryGetProperty("robloxPid", out var nppP) ? nppP.GetInt32() : 0;
                         var notifUserId = root.TryGetProperty("userId", out var nuiP) ? nuiP.GetInt64() : 0;
@@ -887,8 +883,7 @@ end
 
                                     var notif = new NotificationWindow(
                                         notifDisplayName, notifUsername, notifAvatarUrl,
-                                        notifIp, notifPort, notifJobId,
-                                        notifRegion, notifCountry, notifRobloxPid, notifDuration,
+                                        notifJobId, notifRobloxPid, notifDuration,
                                         notifUserId);
                                     notif.Closed += (_, _) => { if (_activeNotification == notif) _activeNotification = null; };
                                     _activeNotification = notif;
