@@ -677,13 +677,65 @@ const KNOWN_GLOBALS = new Set([
     "_G", "_VERSION", "shared",
 ]);
 
-/** Lightweight Luau diagnostics — currently a no-op (clears markers) */
-function validateLuau(
+/** Call luau-lsp analyze via the API route and set Monaco markers */
+let _analyzeAbort: AbortController | null = null;
+
+async function validateLuau(
     model: monacoType.editor.ITextModel,
     monaco: Monaco
 ) {
-    // Clear any stale markers
-    monaco.editor.setModelMarkers(model, "luau-diagnostics", []);
+    const code = model.getValue();
+    if (!code.trim()) {
+        monaco.editor.setModelMarkers(model, "luau-diagnostics", []);
+        return;
+    }
+
+    // Cancel previous in-flight request
+    if (_analyzeAbort) _analyzeAbort.abort();
+    _analyzeAbort = new AbortController();
+
+    try {
+        const res = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code }),
+            signal: _analyzeAbort.signal,
+        });
+        if (!res.ok) {
+            monaco.editor.setModelMarkers(model, "luau-diagnostics", []);
+            return;
+        }
+        const data = await res.json();
+        const diagnostics = data.diagnostics || [];
+
+        const markers: monacoType.editor.IMarkerData[] = diagnostics.map(
+            (d: { line: number; col: number; endLine: number; endCol: number; severity: string; message: string }) => {
+                let severity = monaco.MarkerSeverity.Error;
+                const sev = d.severity.toLowerCase();
+                if (sev.includes("warning") || sev.startsWith("lint")) {
+                    severity = monaco.MarkerSeverity.Warning;
+                } else if (sev.includes("info") || sev.includes("hint")) {
+                    severity = monaco.MarkerSeverity.Info;
+                }
+
+                return {
+                    startLineNumber: d.line,
+                    startColumn: d.col,
+                    endLineNumber: d.endLine,
+                    endColumn: d.endCol,
+                    message: d.message,
+                    severity,
+                    source: "luau-lsp",
+                };
+            }
+        );
+
+        monaco.editor.setModelMarkers(model, "luau-diagnostics", markers);
+    } catch (e: any) {
+        if (e?.name === "AbortError") return; // cancelled — ignore
+        // On error, just clear markers
+        monaco.editor.setModelMarkers(model, "luau-diagnostics", []);
+    }
 }
 
 let _diagTimer: ReturnType<typeof setTimeout> | null = null;
@@ -694,7 +746,7 @@ function registerLuauDiagnostics(editor: monacoType.editor.IStandaloneCodeEditor
         _diagTimer = setTimeout(() => {
             const model = editor.getModel();
             if (model) validateLuau(model, monaco);
-        }, 300); // 300ms debounce
+        }, 500); // 500ms debounce for analyze calls
     };
 
     editor.onDidChangeModelContent(runDiag);
