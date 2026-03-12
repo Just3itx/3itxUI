@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Net.WebSockets;
@@ -180,8 +181,13 @@ public partial class MainWindow : Window
             try { await CheckForUpdates(); }
             catch (Exception ex2) { File.AppendAllText(logFile, $"[{DateTime.Now}] Version check error: {ex2}\n"); }
 
-            // Step 2: Check UI project
-            SetStep(2, "Verifying UI project...");
+            // Step 2: Ensure luau-lsp is available
+            SetStep(2, "Setting up Luau LSP...");
+            try { await EnsureLuauLsp(logFile); }
+            catch (Exception ex2) { File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP setup error: {ex2.Message}\n"); }
+
+            // Step 3: Check UI project
+            SetStep(3, "Verifying UI project...");
             File.AppendAllText(logFile, $"[{DateTime.Now}] _uiPath = {_uiPath}\n");
 
             if (!Directory.Exists(_uiPath))
@@ -193,23 +199,23 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Step 3: Server
-            SetStep(3, "Checking for existing server...");
+            // Step 4: Server
+            SetStep(4, "Checking for existing server...");
             if (await IsServerReady())
             {
                 File.AppendAllText(logFile, $"[{DateTime.Now}] Server already running\n");
-                SetStep(4, "Loading interface...");
+                SetStep(5, "Loading interface...");
                 await InitWebView();
-                SetStep(5, "Ready!");
+                SetStep(6, "Ready!");
                 File.AppendAllText(logFile, $"[{DateTime.Now}] Done\n");
                 return;
             }
 
-            SetStep(3, "Starting Next.js server...");
+            SetStep(4, "Starting Next.js server...");
             File.AppendAllText(logFile, $"[{DateTime.Now}] Starting server\n");
             StartServer();
 
-            SetStep(3, "Waiting for server...");
+            SetStep(4, "Waiting for server...");
             if (!await WaitForServer())
             {
                 File.AppendAllText(logFile, $"[{DateTime.Now}] Server failed to start\n");
@@ -219,13 +225,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Step 4: Loading UI
-            SetStep(4, "Loading interface...");
+            // Step 5: Loading UI
+            SetStep(5, "Loading interface...");
             File.AppendAllText(logFile, $"[{DateTime.Now}] Loading WebView\n");
             await InitWebView();
 
-            // Step 5: Ready
-            SetStep(5, "Ready!");
+            // Step 6: Ready
+            SetStep(6, "Ready!");
             File.AppendAllText(logFile, $"[{DateTime.Now}] Done\n");
         }
         catch (Exception ex)
@@ -1610,5 +1616,414 @@ ws.OnMessage:Connect(function(m) local ok,d=pcall(HttpService.JSONDecode,HttpSer
             catch { }
         }
         base.OnClosed(e);
+    }
+
+    /* ─── Luau LSP Setup ─── */
+    private const string LuauLspApiUrl = "https://api.github.com/repos/JohnnyMorganz/luau-lsp/releases/latest";
+    private const string LuauLspAssetName = "luau-lsp-win64.zip";
+
+    private async Task EnsureLuauLsp(string logFile)
+    {
+        var lspDir = Path.Combine(_dataPath, "luau-lsp");
+        var defsDir = Path.Combine(_dataPath, "definitions");
+        var exePath = Path.Combine(lspDir, "luau-lsp.exe");
+        var versionFile = Path.Combine(lspDir, "version.txt");
+
+        if (!Directory.Exists(lspDir)) Directory.CreateDirectory(lspDir);
+        if (!Directory.Exists(defsDir)) Directory.CreateDirectory(defsDir);
+
+        // Always regenerate definitions (cheap)
+        GenerateDefinitions(defsDir);
+        GenerateLuauRc();
+
+        // Check GitHub for latest version
+        string latestTag;
+        string downloadUrl;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var request = new HttpRequestMessage(HttpMethod.Get, LuauLspApiUrl);
+            request.Headers.Add("User-Agent", "3itx-launcher");
+            var response = await _httpClient.SendAsync(request, cts.Token);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(cts.Token);
+            using var doc = JsonDocument.Parse(json);
+            latestTag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
+
+            // Find the win64 asset download URL
+            downloadUrl = "";
+            foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
+            {
+                var name = asset.GetProperty("name").GetString() ?? "";
+                if (name == LuauLspAssetName)
+                {
+                    downloadUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
+                    break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(latestTag) || string.IsNullOrEmpty(downloadUrl))
+            {
+                File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP: could not parse release info\n");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP: GitHub API error: {ex.Message}\n");
+            return; // silently continue — LSP is optional
+        }
+
+        // Skip download if already up-to-date
+        if (File.Exists(exePath) && File.Exists(versionFile))
+        {
+            var installed = File.ReadAllText(versionFile).Trim();
+            if (installed == latestTag)
+            {
+                File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP: already up-to-date ({latestTag})\n");
+                return;
+            }
+        }
+
+        // Download and extract
+        File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP: downloading {latestTag}...\n");
+        try
+        {
+            var zipPath = Path.Combine(lspDir, "luau-lsp-win64.zip");
+            using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var zipBytes = await _httpClient.GetByteArrayAsync(downloadUrl, cts2.Token);
+            await File.WriteAllBytesAsync(zipPath, zipBytes, cts2.Token);
+
+            // Remove old exe if exists
+            if (File.Exists(exePath)) File.Delete(exePath);
+
+            // Extract — the zip contains luau-lsp.exe at root
+            ZipFile.ExtractToDirectory(zipPath, lspDir, overwriteFiles: true);
+
+            // Clean up zip
+            File.Delete(zipPath);
+
+            // Write version tag
+            File.WriteAllText(versionFile, latestTag);
+
+            File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP: installed {latestTag} successfully\n");
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText(logFile, $"[{DateTime.Now}] Luau LSP: download/extract error: {ex.Message}\n");
+        }
+    }
+
+    private void GenerateLuauRc()
+    {
+        var rcPath = Path.Combine(_dataPath, ".luaurc");
+        var content = @"{
+  ""languageMode"": ""nonstrict"",
+  ""lint"": { ""*"": true },
+  ""lintErrors"": false,
+  ""typeErrors"": false
+}";
+        File.WriteAllText(rcPath, content);
+    }
+
+    private static void GenerateDefinitions(string defsDir)
+    {
+        var defPath = Path.Combine(defsDir, "executor-globals.d.luau");
+        File.WriteAllText(defPath, GetExecutorDefinitions());
+    }
+
+    private static string GetExecutorDefinitions()
+    {
+        return @"--!strict
+-- Auto-generated executor/UNC function type definitions for luau-lsp
+-- Generated by 3itx launcher
+
+-- ═══════════════════════════════════════════════════════════
+-- Environment
+-- ═══════════════════════════════════════════════════════════
+declare function getgenv(): { [string]: any }
+declare function getrenv(): { [string]: any }
+declare function getreg(): { any }
+declare function getgc(includeTables: boolean?): { any }
+declare function filtergc(type: string, options: { [string]: any }, returnOne: boolean?): any
+declare function getinstances(): { Instance }
+declare function getnilinstances(): { Instance }
+declare function getscripts(): { Instance }
+declare function getrunningscripts(): { Instance }
+declare function getloadedmodules(): { Instance }
+declare function fireclickdetector(detector: ClickDetector, distance: number?): ()
+declare function fireproximityprompt(prompt: ProximityPrompt): ()
+declare function firetouchinterest(part: BasePart, toTouch: BasePart, toggle: number): ()
+
+-- ═══════════════════════════════════════════════════════════
+-- Filesystem
+-- ═══════════════════════════════════════════════════════════
+declare function readfile(path: string): string
+declare function readfileasync(path: string): string
+declare function writefile(path: string, contents: string): ()
+declare function writefileasync(path: string, contents: string): ()
+declare function appendfile(path: string, contents: string): ()
+declare function appendfileasync(path: string, contents: string): ()
+declare function loadfile(path: string): (...any) -> ...any
+declare function loadfileasync(path: string): (...any) -> ...any
+declare function listfiles(folder: string): { string }
+declare function isfile(path: string): boolean
+declare function isfolder(path: string): boolean
+declare function makefolder(path: string): ()
+declare function delfolder(path: string): ()
+declare function delfile(path: string): ()
+declare function getsynasset(path: string): string
+declare function saveinstance(options: { [string]: any }?): ()
+declare function saveplace(options: { [string]: any }?): boolean
+
+-- ═══════════════════════════════════════════════════════════
+-- Hooking
+-- ═══════════════════════════════════════════════════════════
+declare function hookfunction(old: (...any) -> ...any, new: (...any) -> ...any): (...any) -> ...any
+declare function hookmetamethod(object: any, method: string, hook: (...any) -> ...any): (...any) -> ...any
+declare function hookproto(proto: any, hook: (...any) -> ...any): ()
+declare function newcclosure(fn: (...any) -> ...any): (...any) -> ...any
+declare function clonefunction(fn: (...any) -> ...any): (...any) -> ...any
+declare function restorefunction(fn: (...any) -> ...any): ()
+declare function restoreproto(proto: any): ()
+declare function isfunctionhooked(fn: (...any) -> ...any): boolean
+declare function setstackhidden(fn: ((...any) -> ...any) | number, hidden: boolean?): ()
+declare function hooksignal(signal: RBXScriptSignal, callback: (...any) -> ...any): ()
+declare function restoresignal(signal: RBXScriptSignal): ()
+declare function issignalhooked(signal: RBXScriptSignal): boolean
+
+-- ═══════════════════════════════════════════════════════════
+-- Script
+-- ═══════════════════════════════════════════════════════════
+declare function loadstring(source: string, chunkName: string?): (...any) -> ...any
+declare function checkcaller(): boolean
+declare function checkcallstack(type: string, level: number?): boolean
+declare function issynapsefunction(fn: (...any) -> ...any): boolean
+declare function isexecutorclosure(fn: (...any) -> ...any): boolean
+declare function islclosure(fn: (...any) -> ...any): boolean
+declare function iscclosure(fn: (...any) -> ...any): boolean
+declare function decompile(target: ((...any) -> ...any) | Instance, options: { [string]: any }?): string
+declare function getscriptthread(script: Instance): thread
+declare function getsenv(script: Instance): { [string]: any }
+declare function getscriptfunction(script: Instance): (...any) -> ...any
+declare function getscripthash(script: Instance): string
+declare function getfunctionhash(fn: (...any) -> ...any): string
+declare function getscriptname(script: Instance): string
+declare function dumpbytecode(target: ((...any) -> ...any) | Instance): string
+declare function getcallingscript(): Instance?
+declare function getscriptbytecode(script: Instance): string
+declare function getscriptclosure(script: Instance): (...any) -> ...any
+declare function issynapsethread(thread: thread): boolean
+declare function setsynapsethread(setToSynapse: boolean, targetThread: thread?): ()
+
+-- ═══════════════════════════════════════════════════════════
+-- Reflection
+-- ═══════════════════════════════════════════════════════════
+declare function setscriptable(instance: Instance, property: string, scriptable: boolean): boolean
+declare function gethiddenproperty(instance: Instance, property: string): any
+declare function sethiddenproperty(instance: Instance, property: string, value: any): ()
+declare function getproperties(instance: Instance): { [string]: any }
+declare function gethiddenproperties(instance: Instance): { [string]: any }
+declare function getpcdprop(instance: Instance): (string, string)
+declare function getcallbackmember(instance: Instance, property: string, returnRaw: boolean?): any
+declare function geteventmember(instance: Instance, eventName: string): RBXScriptSignal
+declare function getrendersteppedlist(): { any }
+
+-- ═══════════════════════════════════════════════════════════
+-- Signal
+-- ═══════════════════════════════════════════════════════════
+declare function getconnections(signal: RBXScriptSignal): { any }
+declare function firesignal(signal: RBXScriptSignal, ...: any): ()
+declare function cfiresignal(signal: RBXScriptSignal, ...: any): ()
+declare function replicatesignal(signal: RBXScriptSignal, ...: any): ()
+declare function cansignalreplicate(signal: RBXScriptSignal): boolean
+declare function getsignalarguments(signal: RBXScriptSignal): { any }
+declare function isconnectionenabled(connection: any): boolean
+declare function setconnectionenabled(connection: any, enabled: boolean): ()
+declare function isluaconnection(connection: any): boolean
+declare function iswaitingconnection(connection: any): boolean
+declare function getconnectionfunction(connection: any): (...any) -> ...any
+declare function getconnectionthread(connection: any): thread
+declare function isgamescriptconnection(connection: any): boolean
+
+-- ═══════════════════════════════════════════════════════════
+-- Table
+-- ═══════════════════════════════════════════════════════════
+declare function getrawmetatable(object: any): { [string]: any }?
+declare function setrawmetatable(object: any, mt: { [string]: any }?): ()
+declare function setreadonly(t: { [any]: any }, readonly: boolean): ()
+declare function isreadonly(t: { [any]: any }): boolean
+declare function setuntouched(t: { [any]: any }, untouched: boolean): ()
+declare function isuntouched(t: { [any]: any }): boolean
+declare function makewritable(t: { [any]: any }): ()
+declare function makereadonly(t: { [any]: any }): ()
+declare function isprotected(t: { [any]: any }): boolean
+
+-- ═══════════════════════════════════════════════════════════
+-- Input
+-- ═══════════════════════════════════════════════════════════
+declare function iswindowactive(): boolean
+declare function isrbxactive(): boolean
+declare function keypress(keyCode: number): ()
+declare function keyrelease(keyCode: number): ()
+declare function keyclick(keyCode: number): ()
+declare function mouse1press(): ()
+declare function mouse1release(): ()
+declare function mouse1click(): ()
+declare function mouse2press(): ()
+declare function mouse2release(): ()
+declare function mouse2click(): ()
+declare function mousescroll(pixels: number): ()
+declare function mousemoverel(x: number, y: number): ()
+declare function mousemoveabs(x: number, y: number): ()
+declare function iskeydown(keyCode: number): boolean
+declare function iskeytoggled(keyCode: number): boolean
+declare function lockwindow(): ()
+declare function unlockwindow(): ()
+declare function iswindowlocked(): boolean
+declare function getmousestate(): { [string]: any }
+declare function setmousestate(state: { [string]: any }): ()
+
+-- ═══════════════════════════════════════════════════════════
+-- Misc
+-- ═══════════════════════════════════════════════════════════
+declare function setclipboard(text: string): ()
+declare function setfflag(flag: string, value: string): ()
+declare function identifyexecutor(): (string, string)
+declare function getexecutorname(): string
+declare function messagebox(text: string, caption: string, flags: number): number
+declare function setwindowtitle(text: string): ()
+declare function setwindowicon(data: string?): ()
+declare function gethui(): Instance
+declare function cloneref(instance: Instance): Instance
+declare function compareinstances(a: Instance, b: Instance): boolean
+declare function newtable(narray: number, nhash: number): { [any]: any }
+declare function unlockmodulescript(module: ModuleScript): ()
+declare function createuitab(title: string, contents: string, icon: string?): ()
+declare function setfpscap(fps: number): ()
+declare function getfpscap(): number
+declare function gethwid(): string
+declare function lz4compress(data: string): string
+declare function lz4decompress(data: string, size: number): string
+declare function setsimulationradius(radius: number, maxRadius: number?): ()
+declare function queue_on_teleport(code: string): ()
+declare function isnetworkowner(part: BasePart): boolean
+
+-- ═══════════════════════════════════════════════════════════
+-- Debug / Closures
+-- ═══════════════════════════════════════════════════════════
+declare function getinfo(fn: ((...any) -> ...any) | number): { [string]: any }
+declare function getupvalue(fn: (...any) -> ...any, index: number): any
+declare function setupvalue(fn: (...any) -> ...any, index: number, value: any): ()
+declare function getupvalues(fn: (...any) -> ...any): { any }
+declare function getconstant(fn: (...any) -> ...any, index: number): any
+declare function setconstant(fn: (...any) -> ...any, index: number, value: any): ()
+declare function getconstants(fn: (...any) -> ...any): { any }
+declare function getproto(fn: (...any) -> ...any, index: number, activated: boolean?): (...any) -> ...any
+declare function getprotos(fn: (...any) -> ...any): { (...any) -> ...any }
+declare function getstack(level: number, index: number?): any
+declare function setstack(level: number, index: number, value: any): ()
+declare function getthreadidentity(): number
+declare function setthreadidentity(identity: number): ()
+declare function getnamecallmethod(): string
+declare function setnamecallmethod(method: string): ()
+
+-- ═══════════════════════════════════════════════════════════
+-- Console
+-- ═══════════════════════════════════════════════════════════
+declare function rconsoleprint(text: string): ()
+declare function rconsolewarn(text: string): ()
+declare function rconsoleerr(text: string): ()
+declare function rconsoleinfo(text: string): ()
+declare function rconsoleclear(): ()
+declare function rconsoleinput(): string
+declare function rconsolename(name: string): ()
+declare function rconsoletitle(title: string): ()
+declare function rconsolecreate(): ()
+declare function rconsoledestroy(): ()
+
+-- ═══════════════════════════════════════════════════════════
+-- HTTP / WebSocket
+-- ═══════════════════════════════════════════════════════════
+declare function request(options: { [string]: any }): { [string]: any }
+declare function http_request(options: { [string]: any }): { [string]: any }
+
+export type WebSocketInstance = {
+    Send: (self: WebSocketInstance, message: string) -> (),
+    Close: (self: WebSocketInstance) -> (),
+    OnMessage: RBXScriptSignal,
+    OnClose: RBXScriptSignal,
+}
+
+declare WebSocket: {
+    connect: (url: string) -> WebSocketInstance,
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- Drawing
+-- ═══════════════════════════════════════════════════════════
+declare Drawing: {
+    new: (type: string) -> any,
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- Crypt
+-- ═══════════════════════════════════════════════════════════
+declare crypt: {
+    base64encode: (data: string) -> string,
+    base64decode: (data: string) -> string,
+    encrypt: (data: string, key: string, iv: string?, mode: string?) -> string,
+    decrypt: (data: string, key: string, iv: string?, mode: string?) -> string,
+    hash: (data: string, algorithm: string) -> string,
+    generatekey: () -> string,
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- RakNet
+-- ═══════════════════════════════════════════════════════════
+export type RakNetMessage = {
+    AsBuffer: buffer,
+    AsString: string,
+    AsArray: { number },
+    Size: number,
+    PacketId: number,
+    Priority: number,
+    Reliability: number,
+    OrderingChannel: number,
+    Block: (self: RakNetMessage) -> (),
+    SetData: (self: RakNetMessage, data: buffer | string | { number }) -> (),
+}
+
+declare raknet: {
+    add_send_hook: (hook: (message: RakNetMessage) -> ()) -> (message: RakNetMessage) -> (),
+    remove_send_hook: (hook: (message: RakNetMessage) -> ()) -> (),
+    send: (data: buffer | string | { number }, priority: number?, reliability: number?, orderingChannel: number?) -> (),
+    add_receive_hook: (hook: (message: RakNetMessage) -> ()) -> (message: RakNetMessage) -> (),
+    remove_receive_hook: (hook: (message: RakNetMessage) -> ()) -> (),
+    receive: (data: buffer | string | { number }) -> (),
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- syn.* namespace
+-- ═══════════════════════════════════════════════════════════
+declare syn: {
+    queue_on_teleport: (script: string) -> (),
+    clear_teleport_queue: () -> (),
+    get_thread_identity: () -> number,
+    set_thread_identity: (identity: number) -> (),
+    protect_gui: (target: Instance) -> (),
+    unprotect_gui: (target: Instance) -> (),
+    trampoline_call: (target: (...any) -> ...any, callStack: { any }, threadOptions: { [string]: any }, ...any) -> (boolean, ...any),
+    toast_notification: (options: { [string]: any }) -> (),
+    ipc_send: (data: any) -> (),
+    oth: {
+        hook: (target: (...any) -> ...any, hook: (...any) -> ...any) -> (...any) -> ...any,
+        unhook: (target: (...any) -> ...any, hookOrCallback: ((...any) -> ...any)?) -> boolean,
+        get_root_callback: () -> (...any) -> ...any,
+        is_hook_thread: () -> boolean,
+        get_original_thread: () -> thread,
+    },
+}
+";
     }
 }
