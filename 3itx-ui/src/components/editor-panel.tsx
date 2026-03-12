@@ -990,7 +990,7 @@ export default function EditorPanel({
                         automaticLayout: true,
                         contextmenu: true,
                         suggestOnTriggerCharacters: true,
-                        quickSuggestions: true,
+                        quickSuggestions: { other: "on", comments: "off", strings: "on" },
                         ...({ "bracketPairColorization.enabled": bracketPairColorization } as any),
                         guides: {
                             bracketPairs: bracketPairColorization,
