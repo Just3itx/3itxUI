@@ -131,7 +131,7 @@ function registerLuauLanguage(monaco: Monaco) {
             "getconstant", "setconstant", "getconstants",
             "getproto", "getprotos", "getstack", "setstack",
             "isrbxactive", "gethwid", "lz4compress", "lz4decompress",
-            "getexecutorname",
+            "getexecutorname", "raknet",
         ],
 
         operators: [
@@ -409,6 +409,14 @@ function registerLuauCompletions(monaco: Monaco) {
 
             const allCompletions = [...ROBLOX_GLOBALS, ...LUAU_STDLIB];
 
+            // ── Luau keywords with HIGHEST priority so "do" beats "decompile" ──
+            const LUAU_KEYWORDS: string[] = [
+                "and", "break", "continue", "do", "else", "elseif", "end",
+                "false", "for", "function", "if", "in", "local", "nil",
+                "not", "or", "repeat", "return", "then", "true", "until", "while",
+                "type", "export", "typeof",
+            ];
+
             const getKind = (label: string): monacoType.languages.CompletionItemKind => {
                 const types = ["Instance", "Vector3", "Vector2", "CFrame", "Color3", "BrickColor",
                     "UDim2", "UDim", "Enum", "Ray", "Region3", "TweenInfo", "NumberRange",
@@ -428,16 +436,26 @@ function registerLuauCompletions(monaco: Monaco) {
                 if (label.startsWith("debug.")) return monaco.languages.CompletionItemKind.Interface;
                 if (label.startsWith("os.")) return monaco.languages.CompletionItemKind.Field;
                 if (label.includes(".")) return monaco.languages.CompletionItemKind.Method;
-                const keywords = ["print", "warn", "error", "assert", "type", "typeof", "tostring",
+                const builtinFns = ["print", "warn", "error", "assert", "type", "typeof", "tostring",
                     "tonumber", "select", "pcall", "xpcall", "ipairs", "pairs", "next",
                     "unpack", "rawget", "rawset", "rawequal", "rawlen", "setmetatable",
                     "getmetatable", "require", "spawn", "delay", "wait", "tick", "time",
                     "elapsedTime", "collectgarbage", "loadstring"];
-                if (keywords.includes(label)) return monaco.languages.CompletionItemKind.Keyword;
+                if (builtinFns.includes(label)) return monaco.languages.CompletionItemKind.Keyword;
                 return monaco.languages.CompletionItemKind.Function;
             };
 
-            const suggestions: monacoType.languages.CompletionItem[] = allCompletions.map((g, i) => ({
+            // Keywords get sortText "!0_" (highest), globals "0_", stdlib "1_"
+            const suggestions: monacoType.languages.CompletionItem[] = LUAU_KEYWORDS.map((kw, i) => ({
+                label: kw,
+                kind: monaco.languages.CompletionItemKind.Keyword,
+                detail: "keyword",
+                insertText: kw,
+                range,
+                sortText: `!0_${String(i).padStart(3, "0")}`,
+            }));
+
+            suggestions.push(...allCompletions.map((g, i) => ({
                 label: g.label,
                 kind: getKind(g.label),
                 detail: g.detail,
@@ -445,7 +463,7 @@ function registerLuauCompletions(monaco: Monaco) {
                 insertText: g.label,
                 range,
                 sortText: `${i < ROBLOX_GLOBALS.length ? "0" : "1"}_${g.label}`,
-            }));
+            })));
 
             return { suggestions };
         },
@@ -655,7 +673,7 @@ const KNOWN_GLOBALS = new Set([
     "getconstant", "setconstant", "getconstants",
     "getproto", "getprotos", "getstack", "setstack",
     "isrbxactive", "gethwid", "lz4compress", "lz4decompress",
-    "getexecutorname",
+    "getexecutorname", "raknet",
     "_G", "_VERSION", "shared",
 ]);
 

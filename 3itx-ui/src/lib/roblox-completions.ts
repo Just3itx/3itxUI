@@ -1560,7 +1560,15 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
     { "label": "syn.oth.is_hook_thread", "detail": "() → boolean", "doc": "Returns whether current thread is a hook thread" },
     { "label": "syn.oth.get_original_thread", "detail": "() → thread", "doc": "Gets the original thread in OTH context" },
     // Network
-    { "label": "getfpscap", "detail": "() → number", "doc": "Returns current FPS cap" }
+    { "label": "getfpscap", "detail": "() → number", "doc": "Returns current FPS cap" },
+    // RakNet
+    { "label": "raknet", "detail": ": table", "doc": "RakNet networking library" },
+    { "label": "raknet.add_send_hook", "detail": "(hook: (message: RakNetMessage) → ()) → function", "doc": "Hooks outgoing RakNet messages, returns the hook" },
+    { "label": "raknet.remove_send_hook", "detail": "(hook: function) → nil", "doc": "Removes a send hook" },
+    { "label": "raknet.send", "detail": "(data: buffer | string | {number}, priority?: number, reliability?: number, orderingChannel?: number) → nil", "doc": "Sends data via RakNet" },
+    { "label": "raknet.add_receive_hook", "detail": "(hook: (message: RakNetMessage) → ()) → function", "doc": "Hooks incoming RakNet messages, returns the hook" },
+    { "label": "raknet.remove_receive_hook", "detail": "(hook: function) → nil", "doc": "Removes a receive hook" },
+    { "label": "raknet.receive", "detail": "(data: buffer | string | {number}) → nil", "doc": "Simulates receiving data via RakNet" }
 ];
 
 /* ─── Class data for dot-completion ─── */
