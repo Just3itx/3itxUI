@@ -485,6 +485,7 @@
                     regionCode: active.code,
                     city: active.city,
                     country: active.country,
+                    serverCount: serverCountsData[active.code] || 0,
                     x: rect.left + active.screenX,
                     y: rect.top + active.screenY - 8
                 }

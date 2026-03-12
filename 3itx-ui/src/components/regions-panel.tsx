@@ -55,20 +55,6 @@ const COUNTRY_CONTINENT_MAP: Record<string, string> = {
     'ZW': 'Africa'
 };
 
-const STATE_MAP: Record<string, string> = {
-    'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
-    'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
-    'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
-    'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
-    'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
-    'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
-    'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
-    'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
-    'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
-    'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
-    'Hesse': 'HE'
-};
-
 // ─── Types ───
 interface Datacenter {
     location_id: number;
@@ -91,16 +77,17 @@ interface RegionMarker {
     countryName: string;
     continent: string;
     coords: { lat: number; lon: number };
-    dataCenterIds: number[];
+    rovalraRegion?: string; // Region code for Rovalra API (e.g. "US-VIRGINIA", "SG")
 }
 
-interface ServerInfo {
-    id: string;
-    playing: number;
-    maxPlayers: number;
-    fps: number;
-    ping: number;
-    dataCenterId: number | null;
+interface RovalraServer {
+    server_id: string;
+    city: string;
+    country: string;
+    region: string;
+    datacenter_id: number;
+    ip_address: string;
+    place_version: number;
 }
 
 interface HoverInfo {
@@ -108,6 +95,7 @@ interface HoverInfo {
     regionCode?: string;
     city?: string;
     country?: string;
+    serverCount?: number;
     x?: number;
     y?: number;
 }
@@ -117,28 +105,36 @@ interface RegionsPanelProps {
     selectedPids: Set<number>;
 }
 
+// Map Rovalra region codes to datacenter marker codes for globe matching
+// Rovalra uses codes like "US-VIRGINIA", "SG", "DE" while the globe uses datacenter-based codes
+function findMatchingDatacenter(rovalraRegion: string, rovalraCity: string, dcMarkers: RegionMarker[]): RegionMarker | null {
+    // Try to find by city name match
+    const cityNormalized = rovalraCity.toLowerCase();
+    return dcMarkers.find(m => m.city.toLowerCase() === cityNormalized) || null;
+}
+
 export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProps) {
     // ─── State ───
     const [selectedAccountPid, setSelectedAccountPid] = useState<number | null>(null);
     const [placeId, setPlaceId] = useState("");
     const [dropdownOpen, setDropdownOpen] = useState(false);
-    const [datacenters, setDatacenters] = useState<RegionMarker[]>([]);
+    const [dcMarkers, setDcMarkers] = useState<RegionMarker[]>([]);
     const [globeReady, setGlobeReady] = useState(false);
     const [hover, setHover] = useState<HoverInfo>({ active: false });
-    const [selectedRegion, setSelectedRegion] = useState<RegionMarker | null>(null);
-    const [servers, setServers] = useState<ServerInfo[]>([]);
+    const [selectedRegion, setSelectedRegion] = useState<{ code: string; city: string; countryName: string; rovalraRegion: string } | null>(null);
+    const [servers, setServers] = useState<RovalraServer[]>([]);
     const [loadingServers, setLoadingServers] = useState(false);
     const [teleporting, setTeleporting] = useState<string | null>(null);
 
     const globeContainerRef = useRef<HTMLDivElement>(null);
     const scriptLoadedRef = useRef(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
-    const datacentersRef = useRef<RegionMarker[]>([]);
+    const dcMarkersRef = useRef<RegionMarker[]>([]);
     const placeIdRef = useRef(placeId);
-    const fetchServersRef = useRef<(region: RegionMarker) => void>(() => { });
+    const fetchServersRef = useRef<(region: { code: string; rovalraRegion: string; city: string; countryName: string }) => void>(() => { });
 
     // Keep refs in sync
-    useEffect(() => { datacentersRef.current = datacenters; }, [datacenters]);
+    useEffect(() => { dcMarkersRef.current = dcMarkers; }, [dcMarkers]);
     useEffect(() => { placeIdRef.current = placeId; }, [placeId]);
 
     // Auto-select first connected client
@@ -150,7 +146,6 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                 setPlaceId(String(first.placeId));
             }
         } else if (selectedAccountPid !== null) {
-            // Update placeId when selected client switches games
             const selectedClient = clients.find(c => c.pid === selectedAccountPid);
             if (selectedClient && selectedClient.placeId && selectedClient.placeId > 0) {
                 const newPlaceId = String(selectedClient.placeId);
@@ -187,8 +182,7 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                     .map(dc => {
                         const country = dc.location.country;
                         const continent = COUNTRY_CONTINENT_MAP[country] || "Unknown";
-                        const regionCode = STATE_MAP[dc.location.region] || dc.location.region;
-                        const code = `${country}-${regionCode}-${dc.location_id}`;
+                        const code = `${country}-${dc.location.region}-${dc.location_id}`;
                         return {
                             code,
                             city: dc.location.city,
@@ -199,12 +193,11 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                                 lat: parseFloat(dc.location.latLong[0]),
                                 lon: parseFloat(dc.location.latLong[1]),
                             },
-                            dataCenterIds: dc.dataCenterIds,
                         };
                     });
 
-                setDatacenters(markers);
-                datacentersRef.current = markers;
+                setDcMarkers(markers);
+                dcMarkersRef.current = markers;
 
                 // Build REGIONS object grouped by continent
                 const REGIONS: Record<string, Record<string, { city: string; country: string; coords: { lat: number; lon: number } }>> = {};
@@ -217,7 +210,7 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                     };
                 }
 
-                // Build serverCounts (start at 0 — will update when servers are scanned)
+                // Build serverCounts (start at 0 — will update when Rovalra counts are fetched)
                 const serverCounts: Record<string, number> = {};
                 for (const m of markers) {
                     serverCounts[m.code] = 0;
@@ -235,10 +228,8 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                     });
                 }
 
-                // Wait a tick for the script IIFE to register its event listener
                 await new Promise(r => setTimeout(r, 100));
 
-                // Dispatch init event
                 document.dispatchEvent(
                     new CustomEvent("initRovalraGlobe", {
                         detail: {
@@ -269,10 +260,18 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
         const onRegionSelect = (e: Event) => {
             const detail = (e as CustomEvent).detail;
             const regionCode = detail.regionCode;
-            const marker = datacentersRef.current.find(m => m.code === regionCode);
+            const marker = dcMarkersRef.current.find(m => m.code === regionCode);
             if (marker) {
-                setSelectedRegion(marker);
-                fetchServersRef.current(marker);
+                // Find the Rovalra region code for this datacenter marker
+                const rovalraRegion = findRovalraRegionForMarker(marker);
+                const regionInfo = {
+                    code: marker.code,
+                    city: marker.city,
+                    countryName: marker.countryName,
+                    rovalraRegion,
+                };
+                setSelectedRegion(regionInfo);
+                fetchServersRef.current(regionInfo);
             }
         };
 
@@ -284,119 +283,109 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
         };
     }, []);
 
-    // ─── Fetch servers filtered by datacenter ───
-    const selectedRegionRef = useRef<RegionMarker | null>(null);
-    const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const [scanning, setScanning] = useState(false);
+    // ─── Map datacenter marker to Rovalra region ───
+    // Rovalra uses region codes like "US-VIRGINIA", "SG", "DE", "JP", etc.
+    const rovalraRegionMapRef = useRef<Record<string, string>>({});
 
-    // Cleanup poll on unmount
-    useEffect(() => {
-        return () => { if (scanIntervalRef.current) clearInterval(scanIntervalRef.current); };
-    }, []);
+    function findRovalraRegionForMarker(marker: RegionMarker): string {
+        if (marker.rovalraRegion) return marker.rovalraRegion;
+        // Try to find a matching rovalra region from the cached region map
+        const cached = rovalraRegionMapRef.current;
+        for (const [rovalraCode] of Object.entries(cached)) {
+            // Direct code match (e.g. marker code starts with "US-" and rovalra is "US-VIRGINIA")
+            if (marker.code.startsWith(marker.country + "-")) {
+                const rovalraKey = Object.keys(cached).find(k => {
+                    const cityInCached = cached[k];
+                    return cityInCached && marker.city.toLowerCase() === cityInCached.toLowerCase();
+                });
+                if (rovalraKey) return rovalraKey;
+            }
+        }
+        // Fallback: try simple country code (for non-US regions like "SG", "DE", "JP")
+        if (!marker.country.startsWith("US") && cached[marker.country]) {
+            return marker.country;
+        }
+        return marker.country;
+    }
 
-    // Reset panel when placeId changes
+    // ─── Fetch Rovalra counts when placeId changes → update globe ───
     const lastProbedPlaceId = useRef("");
     useEffect(() => {
         if (lastProbedPlaceId.current && lastProbedPlaceId.current !== placeId) {
             setSelectedRegion(null);
             setServers([]);
-            selectedRegionRef.current = null;
-            if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
             document.dispatchEvent(new CustomEvent('rovalraGlobePanelClosed'));
         }
         lastProbedPlaceId.current = placeId;
     }, [placeId]);
 
-    // Auto-scan when placeId changes — lights up globe markers as datacenters are discovered
-    const autoScanRef = useRef<ReturnType<typeof setInterval> | null>(null);
     useEffect(() => {
-        if (autoScanRef.current) { clearInterval(autoScanRef.current); autoScanRef.current = null; }
         if (!placeId.trim() || !globeReady) return;
+        let cancelled = false;
 
-        const updateGlobe = async () => {
+        const fetchCounts = async () => {
             try {
                 const res = await fetch(`/api/servers?placeId=${placeId}`);
                 const data = await res.json();
-                const allServers = (data.servers || []) as Array<{ dataCenterId: number | null }>;
+                if (cancelled || data.status !== "success") return;
 
-                // Count servers per datacenter, then map to globe markers
-                const dcCounts = new Map<number, number>();
-                for (const s of allServers) {
-                    if (s.dataCenterId != null) {
-                        dcCounts.set(s.dataCenterId, (dcCounts.get(s.dataCenterId) || 0) + 1);
+                const detailedRegions: Record<string, { cities: Record<string, number>; total_servers: number }> = data.counts?.detailed_regions || {};
+
+                // Build a city→rovalraRegion map for later lookups
+                const cityToRegion: Record<string, string> = {};
+                for (const [regionCode, regionData] of Object.entries(detailedRegions)) {
+                    for (const cityName of Object.keys(regionData.cities)) {
+                        cityToRegion[cityName.toLowerCase()] = regionCode;
+                    }
+                    rovalraRegionMapRef.current[regionCode] = Object.keys(regionData.cities)[0] || "";
+                }
+
+                // Map Rovalra region counts to datacenter-based globe marker codes
+                const dcs = dcMarkersRef.current;
+                const serverCounts: Record<string, number> = {};
+                for (const dc of dcs) {
+                    const rovalraCode = cityToRegion[dc.city.toLowerCase()];
+                    if (rovalraCode && detailedRegions[rovalraCode]) {
+                        serverCounts[dc.code] = detailedRegions[rovalraCode].cities[dc.city] || detailedRegions[rovalraCode].total_servers;
+                        dc.rovalraRegion = rovalraCode;
+                    } else {
+                        serverCounts[dc.code] = 0;
                     }
                 }
 
-                const dcs = datacentersRef.current;
-                const serverCounts: Record<string, number> = {};
-                for (const dc of dcs) {
-                    const count = dc.dataCenterIds.reduce((sum, id) => sum + (dcCounts.get(id) || 0), 0);
-                    serverCounts[dc.code] = count;
-                }
                 document.dispatchEvent(new CustomEvent('rovalraGlobe_UpdateData', {
                     detail: { serverCounts }
                 }));
-
-                if (!data.scanning && autoScanRef.current) {
-                    clearInterval(autoScanRef.current);
-                    autoScanRef.current = null;
-                }
-            } catch { /* ignore */ }
+            } catch (err) {
+                console.error("[Regions] Failed to fetch counts:", err);
+            }
         };
 
-        updateGlobe();
-        autoScanRef.current = setInterval(updateGlobe, 4000);
+        fetchCounts();
+        return () => { cancelled = true; };
+    }, [placeId, globeReady, dcMarkers]);
 
-        return () => { if (autoScanRef.current) { clearInterval(autoScanRef.current); autoScanRef.current = null; } };
-    }, [placeId, globeReady, datacenters]);
-
-    const fetchServers = useCallback(async (region: RegionMarker) => {
+    // ─── Fetch servers for a selected region ───
+    const fetchServers = useCallback(async (region: { code: string; rovalraRegion: string; city: string; countryName: string }) => {
         const currentPlaceId = placeIdRef.current;
         if (!currentPlaceId.trim()) return;
         setLoadingServers(true);
         setServers([]);
-        selectedRegionRef.current = region;
 
-        // Stop existing poll
-        if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
+        try {
+            const res = await fetch(`/api/servers?placeId=${currentPlaceId}&region=${encodeURIComponent(region.rovalraRegion)}`);
+            const data = await res.json();
 
-        const doFetch = async (isInitial: boolean) => {
-            try {
-                const res = await fetch(`/api/servers?placeId=${currentPlaceId}`);
-                const data = await res.json();
-
-                const allServers: ServerInfo[] = data.servers || [];
-
-                // Filter to servers matching this region's datacenter IDs
-                const dcIds = new Set(region.dataCenterIds);
-                const filtered = allServers.filter(s => s.dataCenterId != null && dcIds.has(s.dataCenterId));
-                setServers(filtered);
-                setScanning(!!data.scanning);
-
-                if (!data.scanning && scanIntervalRef.current) {
-                    clearInterval(scanIntervalRef.current);
-                    scanIntervalRef.current = null;
-                }
-                return !!data.scanning;
-            } catch (err) {
-                console.error("[Regions] Failed to fetch servers:", err);
-                if (isInitial) setServers([]);
-                return false;
-            } finally {
-                if (isInitial) setLoadingServers(false);
+            if (data.status === "success" && Array.isArray(data.servers)) {
+                setServers(data.servers);
+            } else {
+                setServers([]);
             }
-        };
-
-        const stillScanning = await doFetch(true);
-
-        if (stillScanning) {
-            scanIntervalRef.current = setInterval(() => {
-                if (selectedRegionRef.current?.code === region.code) {
-                    doFetch(false);
-                } else {
-                    if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
-                }
-            }, 4000);
+        } catch (err) {
+            console.error("[Regions] Failed to fetch servers:", err);
+            setServers([]);
+        } finally {
+            setLoadingServers(false);
         }
     }, []);
 
@@ -413,11 +402,11 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
     }, []);
 
     // ─── Teleport to server ───
-    const handleTeleport = useCallback(async (server: ServerInfo) => {
+    const handleTeleport = useCallback(async (server: RovalraServer) => {
         if (!selectedAccountPid || !placeId.trim()) return;
 
-        setTeleporting(server.id);
-        const script = `game:GetService("TeleportService"):TeleportToPlaceInstance(${placeId}, "${server.id}")`;
+        setTeleporting(server.server_id);
+        const script = `game:GetService("TeleportService"):TeleportToPlaceInstance(${placeId}, "${server.server_id}")`;
         await fsBridge.executeOnClients([selectedAccountPid], script);
 
         setTimeout(() => setTeleporting(null), 2000);
@@ -427,7 +416,6 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
     const handleCloseServers = useCallback(() => {
         setSelectedRegion(null);
         setServers([]);
-        // Let globe know panel closed
         document.dispatchEvent(new CustomEvent("rovalraGlobePanelClosed"));
     }, []);
 
@@ -570,7 +558,14 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                         >
                             <div className="bg-[#141416]/95 backdrop-blur-sm border border-white/[0.1] rounded-lg px-2.5 py-1.5 shadow-xl">
                                 <div className="text-[10px] text-foreground font-medium">{hover.city}</div>
-                                <div className="text-[8px] text-muted-foreground/60">{hover.country}</div>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-[8px] text-muted-foreground/60">{hover.country}</span>
+                                    {(hover.serverCount != null && hover.serverCount > 0) && (
+                                        <span className="text-[8px] text-blue-400/80 font-medium">
+                                            {hover.serverCount.toLocaleString()} server{hover.serverCount !== 1 ? "s" : ""}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -626,54 +621,40 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                                 ) : (
                                     servers.map((server, idx) => (
                                         <div
-                                            key={server.id || idx}
+                                            key={server.server_id || idx}
                                             className="group rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/[0.1] p-2 transition-all"
                                         >
                                             <div className="flex items-center gap-2">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-1.5">
-                                                        {server.playing != null ? (
-                                                            <>
-                                                                <Users className="w-2.5 h-2.5 text-muted-foreground/40" />
-                                                                <span className="text-[10px] text-foreground">
-                                                                    {server.playing}/{server.maxPlayers}
-                                                                </span>
-                                                            </>
-                                                        ) : (
-                                                            <span className="text-[10px] text-foreground font-medium">Server</span>
-                                                        )}
-                                                        {server.fps > 0 && (
-                                                            <span className="text-[8px] text-muted-foreground/40">
-                                                                {Math.round(server.fps)} FPS
-                                                            </span>
-                                                        )}
-                                                        {server.ping > 0 && (
-                                                            <span className="text-[8px] text-muted-foreground/40">
-                                                                {Math.round(server.ping)}ms
-                                                            </span>
-                                                        )}
+                                                        <span className="text-[10px] text-foreground font-medium">
+                                                            {server.city}
+                                                        </span>
+                                                        <span className="text-[8px] text-muted-foreground/40">
+                                                            DC {server.datacenter_id}
+                                                        </span>
                                                     </div>
                                                     <div className="text-[7px] text-muted-foreground/30 truncate mt-0.5 font-mono">
-                                                        {server.id}
+                                                        {server.server_id}
                                                     </div>
                                                 </div>
                                                 <button
                                                     onClick={() => handleTeleport(server)}
-                                                    disabled={!selectedAccountPid || teleporting === server.id}
+                                                    disabled={!selectedAccountPid || teleporting === server.server_id}
                                                     className={cn(
                                                         "shrink-0 h-6 px-2 flex items-center gap-1 rounded text-[9px] font-medium transition-all",
-                                                        teleporting === server.id
+                                                        teleporting === server.server_id
                                                             ? "bg-emerald-500/20 text-emerald-400 cursor-wait"
                                                             : "bg-white/[0.06] text-muted-foreground hover:bg-white/[0.12] hover:text-foreground",
                                                         !selectedAccountPid && "opacity-40 cursor-not-allowed"
                                                     )}
                                                 >
-                                                    {teleporting === server.id ? (
+                                                    {teleporting === server.server_id ? (
                                                         <Loader2 className="w-2.5 h-2.5 animate-spin" />
                                                     ) : (
                                                         <ArrowRight className="w-2.5 h-2.5" />
                                                     )}
-                                                    {teleporting === server.id ? "Joining..." : "Join"}
+                                                    {teleporting === server.server_id ? "Joining..." : "Join"}
                                                 </button>
                                             </div>
                                         </div>
@@ -688,17 +669,9 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                                 <span className="text-[8px] text-muted-foreground/40">
                                     {servers.length} server{servers.length !== 1 ? "s" : ""} found
                                 </span>
-                                <div className="flex items-center gap-1.5">
-                                    {scanning && (
-                                        <div className="flex items-center gap-1">
-                                            <Loader2 className="w-2.5 h-2.5 text-blue-400/60 animate-spin" />
-                                            <span className="text-[8px] text-blue-400/60">Scanning...</span>
-                                        </div>
-                                    )}
-                                    <span className="text-[8px] text-muted-foreground/30">
-                                        {selectedRegion.city}, {selectedRegion.countryName}
-                                    </span>
-                                </div>
+                                <span className="text-[8px] text-muted-foreground/30">
+                                    {selectedRegion.city}, {selectedRegion.countryName}
+                                </span>
                             </div>
                         </div>
                     </div>
