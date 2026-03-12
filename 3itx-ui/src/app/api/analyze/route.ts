@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
+import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -41,9 +41,9 @@ function parseDiagnostics(output: string): DiagnosticResult[] {
     const results: DiagnosticResult[] = [];
     const lines = output.split("\n");
 
-    for (const line of lines) {
-        if (!line.trim()) continue;
-        if (line.startsWith("[INFO]") || line.startsWith("[WARN]")) continue;
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (line.startsWith("[INFO]") || line.startsWith("[WARN]") || line.startsWith("WARNING")) continue;
         if (!line.includes("): ")) continue;
 
         // Match: path/file.luau(line,col): Category: message
@@ -113,22 +113,15 @@ export async function POST(req: NextRequest) {
 
         args.push(tempFile);
 
-        // Use spawn instead of execFile to reliably capture all output
-        const diagnostics = await new Promise<DiagnosticResult[]>((resolve) => {
-            const proc = spawn(lspExe, args, { timeout: 10000 });
-            let allOutput = "";
-
-            proc.stdout.on("data", (data) => { allOutput += data.toString(); });
-            proc.stderr.on("data", (data) => { allOutput += data.toString(); });
-
-            proc.on("close", () => {
-                resolve(parseDiagnostics(allOutput));
-            });
-
-            proc.on("error", () => {
-                resolve([]);
-            });
+        // Use spawnSync to avoid async buffering issues
+        const result = spawnSync(lspExe, args, {
+            timeout: 10000,
+            maxBuffer: 1024 * 1024,
+            encoding: "utf-8",
         });
+
+        const allOutput = (result.stderr || "") + (result.stdout || "");
+        const diagnostics = parseDiagnostics(allOutput);
 
         // Cleanup temp file
         try { fs.unlinkSync(tempFile); } catch { /* ignore */ }
