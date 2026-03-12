@@ -59,9 +59,9 @@ function parseDiagnostics(output: string): DiagnosticResult[] {
             const severity = match[5];
             const message = match[6].trim();
 
-            // Only show actual errors (TypeError, SyntaxError), skip lint warnings
-            const sevLower = severity.toLowerCase();
-            if (!sevLower.includes("error") && !sevLower.includes("type")) continue;
+            // Only show syntax errors — TypeErrors are too strict for executor scripts
+            // (e.g. custom type annotations like `:fun` or dynamic globals are valid)
+            if (severity !== "SyntaxError") continue;
 
             results.push({
                 line: startLine,
