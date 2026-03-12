@@ -25,7 +25,7 @@ public partial class MainWindow : Window
     private const string ServerUrl = "http://localhost:9367";
     private const int MaxRetries = 240;
     private const int WsPort = 24892;
-    private const string CurrentVersion = "1.0.4";
+    private const string CurrentVersion = "1.0.5";
     private const string VersionCheckUrl = "https://raw.githubusercontent.com/Just3itx/3itxUI/refs/heads/main/Verison.json";
     private const string ReleasesUrl = "https://github.com/Just3itx/3itxUI/releases/tag/Latest";
 
