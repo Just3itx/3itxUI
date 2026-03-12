@@ -28,6 +28,56 @@ function getGlobalTypesPath() {
     return path.join(projectRoot, "globalTypes.d.lua");
 }
 
+interface DiagnosticResult {
+    line: number;
+    col: number;
+    endLine: number;
+    endCol: number;
+    severity: string;
+    message: string;
+    code: string;
+}
+
+function parseDiagnostics(output: string): DiagnosticResult[] {
+    const results: DiagnosticResult[] = [];
+    const lines = output.split("\n");
+
+    for (const line of lines) {
+        // Skip non-diagnostic lines (info messages, blank lines)
+        if (!line.trim()) continue;
+        if (line.startsWith("[INFO]") || line.startsWith("[WARN]")) continue;
+        if (!line.includes("): ")) continue;
+
+        // Match patterns like:
+        // path/file.luau(2,1): TypeError: message
+        // path/file.luau(2,1-2,14): TypeError: message
+        // path/file.luau(1,7): LocalUnused: Variable 'x' is never used...
+        const match = line.match(
+            /\((\d+),(\d+)(?:-(\d+),(\d+))?\):\s*(\w+):\s*(.+)$/
+        );
+        if (match) {
+            const startLine = parseInt(match[1], 10);
+            const startCol = parseInt(match[2], 10);
+            const endLine = match[3] ? parseInt(match[3], 10) : startLine;
+            const endCol = match[4] ? parseInt(match[4], 10) : startCol + 1;
+            const severity = match[5];
+            const message = match[6].trim();
+
+            results.push({
+                line: startLine,
+                col: startCol,
+                endLine,
+                endCol,
+                severity,
+                message,
+                code: severity,
+            });
+        }
+    }
+
+    return results;
+}
+
 export async function POST(req: NextRequest) {
     try {
         const { code } = await req.json();
@@ -71,61 +121,23 @@ export async function POST(req: NextRequest) {
         args.push(tempFile);
 
         // Run luau-lsp analyze
-        const diagnostics = await new Promise<Array<{
-            line: number;
-            col: number;
-            endLine: number;
-            endCol: number;
-            severity: string;
-            message: string;
-            code: string;
-        }>>((resolve) => {
+        const diagnostics = await new Promise<DiagnosticResult[]>((resolve) => {
             execFile(lspExe, args, { timeout: 10000, maxBuffer: 1024 * 512 }, (error, stdout, stderr) => {
-                const output = (stderr || "") + (stdout || "");
-                const results: Array<{
-                    line: number;
-                    col: number;
-                    endLine: number;
-                    endCol: number;
-                    severity: string;
-                    message: string;
-                    code: string;
-                }> = [];
-
-                // Parse each line: file(line,col-endline,endcol): Severity: message
-                // Or simpler: file(line,col): Severity: message
-                const lines = output.split("\n");
-                for (const line of lines) {
-                    // Skip non-diagnostic lines
-                    if (line.startsWith("[INFO]") || line.startsWith("[WARN]") || !line.includes("): ")) continue;
-
-                    // Match patterns like:
-                    // file.luau(2,1): Warning: message
-                    // file.luau(2,1-2,14): TypeError: message
-                    const match = line.match(
-                        /\((\d+),(\d+)(?:-(\d+),(\d+))?\):\s*(Warning|TypeError|Error|SyntaxError|Lint\w*|Unknown\w*):\s*(.+)$/
-                    );
-                    if (match) {
-                        const startLine = parseInt(match[1], 10);
-                        const startCol = parseInt(match[2], 10);
-                        const endLine = match[3] ? parseInt(match[3], 10) : startLine;
-                        const endCol = match[4] ? parseInt(match[4], 10) : startCol + 1;
-                        const severity = match[5];
-                        const message = match[6].trim();
-
-                        results.push({
-                            line: startLine,
-                            col: startCol,
-                            endLine,
-                            endCol,
-                            severity,
-                            message,
-                            code: severity,
-                        });
-                    }
+                // luau-lsp analyze returns exit code 1 when it finds errors
+                // Diagnostics go to stderr, so we need to capture ALL output
+                let allOutput = "";
+                if (stderr) allOutput += stderr;
+                if (stdout) allOutput += stdout;
+                // When execFile reports an error with code 1, stderr might be in error.stderr
+                if (error && (error as any).stderr) {
+                    allOutput += (error as any).stderr;
+                }
+                // Also check error.stdout
+                if (error && (error as any).stdout) {
+                    allOutput += (error as any).stdout;
                 }
 
-                resolve(results);
+                resolve(parseDiagnostics(allOutput));
             });
         });
 
