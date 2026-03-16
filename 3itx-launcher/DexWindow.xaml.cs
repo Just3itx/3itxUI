@@ -132,6 +132,9 @@ public partial class DexWindow : Window
                     userDataFolder: Path.Combine(Path.GetTempPath(), "3itx-dex-webview"));
                 await DexWebView.EnsureCoreWebView2Async(env);
 
+                // Disable Default Context Menu
+                DexWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+
                 // Disable cache so the latest JS from the dev server is always loaded
                 await DexWebView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                     "Network.setCacheDisabled", "{\"cacheDisabled\": true}");

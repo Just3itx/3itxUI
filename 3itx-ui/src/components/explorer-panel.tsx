@@ -18,6 +18,7 @@ import {
     ExternalLink,
     ArrowRightLeft,
     Plus,
+    Play,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -48,6 +49,7 @@ interface ExplorerPanelProps {
     searchQuery: string;
     onSearchChange: (q: string) => void;
     onRefresh?: () => void;
+    onExecuteNode?: (node: ExplorerNode, section: "scripts" | "autoexec") => void;
 }
 
 /* ─── Helpers ─── */
@@ -122,6 +124,7 @@ export default function ExplorerPanel({
     searchQuery,
     onSearchChange,
     onRefresh,
+    onExecuteNode,
 }: ExplorerPanelProps) {
     const [contextMenu, setContextMenu] = useState<{
         x: number;
@@ -231,6 +234,13 @@ export default function ExplorerPanel({
     );
 
     const buildFileMenu = (node: ExplorerNode, section: "scripts" | "autoexec"): ContextMenuItem[] => [
+        {
+            label: "Execute", icon: <Play className="w-3 h-3" />,
+            action: () => {
+                if (onExecuteNode) onExecuteNode(node, section);
+            },
+        },
+        { label: "", action: () => { }, separator: true },
         {
             label: "Rename", icon: <Pencil className="w-3 h-3" />,
             action: () => { setEditingId(node.id); setEditingName(node.name); },

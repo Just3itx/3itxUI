@@ -458,6 +458,34 @@ export default function Home() {
     showToast("Script executed", "success");
   }, [tabs, activeTabId, log, showToast, selectedPids, settings.debugMode]);
 
+  const executeNode = useCallback(async (node: ExplorerNode, section: "scripts" | "autoexec") => {
+    if (node.type !== "file") return;
+    const pids = Array.from(selectedPids);
+    if (pids.length === 0) {
+      showToast("No accounts selected", "error");
+      return;
+    }
+
+    try {
+      const content = node.content !== undefined && node.content !== "" 
+        ? node.content 
+        : await fsBridge.readFile(section, node.name);
+      
+      if (!content.trim()) {
+        showToast("Script is empty", "error");
+        return;
+      }
+      
+      if (settings.debugMode) log(`Executing "${node.name}"...`, "info");
+      fsBridge.executeOnClients(pids, content, settings.executionMethod);
+      if (settings.debugMode) log(`Script sent to ${pids.length} client(s): PID ${pids.join(", ")}`, "success");
+      
+      showToast(`Executed ${node.name}`, "success");
+    } catch (e) {
+      showToast(`Failed to read ${node.name}`, "error");
+    }
+  }, [selectedPids, log, showToast, settings.debugMode, settings.executionMethod]);
+
   const clear = useCallback(() => {
     setTabs((prev) =>
       prev.map((t) => (t.id === activeTabId ? { ...t, content: "" } : t))
@@ -599,6 +627,7 @@ export default function Home() {
                 onAutoExecChange={setAutoExecTree}
                 activeFile={activeTab ? `${activeTab.section || "scripts"}:${activeTab.fileName || activeTab.name}` : null}
                 onFileClick={openExplorerFile}
+                onExecuteNode={executeNode}
                 searchQuery={explorerSearch}
                 onSearchChange={setExplorerSearch}
                 onRefresh={refreshExplorer}

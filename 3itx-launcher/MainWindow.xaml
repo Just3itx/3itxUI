@@ -237,7 +237,7 @@
 
             <!-- ZZZ Minimal Progress Bar and Odometer -->
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <Border Background="#050505" BorderBrush="#d4d4d8" BorderThickness="2" Padding="6,4">
+                <Border Background="Transparent" BorderBrush="#d4d4d8" BorderThickness="2" Padding="6,4">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="ProgressNumber" Text="0" 
                                    FontFamily="pack://application:,,,/Fonts/#JetBrains Mono" FontSize="18" FontWeight="Bold"
