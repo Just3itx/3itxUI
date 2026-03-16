@@ -45,6 +45,8 @@ public partial class MainWindow : Window
     private NotificationWindow? _activeNotification;
     private readonly ConcurrentDictionary<int, PidOnlyClient> _pidOnlyClients = new();
     private TaskCompletionSource<bool>? _weaoContinueTcs;
+    private readonly Dictionary<int, DexWindow> _dexWindows = new();
+    private ConsoleWindow? _consoleWindow;
 
     private class PidOnlyClient
     {
@@ -54,7 +56,7 @@ public partial class MainWindow : Window
 
     private class WsClient
     {
-        public WebSocket Socket { get; set; } = null!;
+        public WebSocket? Socket { get; set; }
         public int Pid { get; set; }
         public long UserId { get; set; }
         public string Username { get; set; } = "";
@@ -104,11 +106,12 @@ public partial class MainWindow : Window
         if (!Directory.Exists(scriptsDir)) Directory.CreateDirectory(scriptsDir);
         if (!Directory.Exists(autoExecDir)) Directory.CreateDirectory(autoExecDir);
 
-        StartSpinner();
+
 
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
         SourceInitialized += MainWindow_SourceInitialized;
+        WindowResizeHelper.EnableResize(this);
     }
 
     /* ─── Windows 11 rounded corners ─── */
@@ -143,15 +146,50 @@ public partial class MainWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
-    /* ─── Spinner ─── */
-    private void StartSpinner()
+
+
+    /* ─── Ribbon animations ─── */
+    private void StartRibbonAnimations()
     {
-        var anim = new DoubleAnimation(0, 360, TimeSpan.FromMilliseconds(900))
+        // 1. Horizontal Infinite Scrolling (X-Axis)
+        // Translation is exactly the width of each respective Ribbon's repeating segment (Viewport width)
+        // Speeds adjusted for parallax depth effect (back = slow, front = fast).
+        var ribbons = new (System.Windows.Media.TranslateTransform tt, double speed, double distance)[]
         {
-            RepeatBehavior = RepeatBehavior.Forever,
+            (Ribbon0Translate, 40, -280), // Back (slowest, 280px wide base segment)
+            (Ribbon1Translate, 28, -420), // Mid (420px wide base segment)
+            (Ribbon2Translate, 18, -560), // Front (fastest, 560px wide base segment)
         };
-        SpinnerRotation.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty, anim);
+        foreach (var (tt, speed, distance) in ribbons)
+        {
+            var anim = new DoubleAnimation(0, distance, TimeSpan.FromSeconds(speed))
+            {
+                RepeatBehavior = RepeatBehavior.Forever,
+            };
+            tt.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, anim);
+        }
     }
+
+    /* ─── Progress bar ─── */
+    private readonly System.Windows.Shapes.Rectangle[] _progressBlocks = new System.Windows.Shapes.Rectangle[10];
+
+    private void InitProgressBar()
+    {
+        ProgressBarBlocks.Children.Clear();
+        for (int i = 0; i < 10; i++)
+        {
+            var block = new System.Windows.Shapes.Rectangle
+            {
+                Width = 12, Height = 14,
+                Fill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Black),
+                Margin = new Thickness(1, 0, 1, 0),
+            };
+            _progressBlocks[i] = block;
+            ProgressBarBlocks.Children.Add(block);
+        }
+    }
+
+    // UpdateProgress was moved below near SetStep for async odometer animation
 
     /* ─── Lifecycle ─── */
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -160,6 +198,11 @@ public partial class MainWindow : Window
         {
             var logFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "startup.log");
             File.WriteAllText(logFile, $"[{DateTime.Now}] MainWindow_Loaded started\n");
+
+            // Initialize loading screen animations
+            InitProgressBar();
+            StartRibbonAnimations();
+            UpdateProgress(0);
 
             // Step 1: Check WEAO status + updates
             SetStep(1, "Checking Synapse Z status...");
@@ -396,7 +439,7 @@ public partial class MainWindow : Window
         for (int i = 0; i < MaxRetries; i++)
         {
             if (await IsServerReady()) return true;
-            UpdateStatus($"Waiting for server... ({(i + 1) / 2}s)", 30 + (int)(55.0 * i / MaxRetries));
+            UpdateStatus($"Waiting for server... ({(i + 1) / 2}s)", 40 + (int)(50.0 * i / MaxRetries));
             await Task.Delay(500);
         }
         return false;
@@ -416,17 +459,39 @@ public partial class MainWindow : Window
 
         var settings = WebView.CoreWebView2.Settings;
         settings.AreDefaultContextMenusEnabled = false;
-        settings.AreDevToolsEnabled = true; // temporarily enabled for debugging
+        settings.AreDevToolsEnabled = true;
         settings.IsStatusBarEnabled = false;
         settings.IsZoomControlEnabled = false;
 
         UpdateStatus("Ready.", 100);
         WebView.CoreWebView2.Navigate(ServerUrl);
 
+        // Hide loading overlay and show WebView
+        LoadingOverlay.Visibility = Visibility.Collapsed;
+        WebView.Visibility = Visibility.Visible;
+
         // Start WebSocket server and process polling
         _ = Task.Run(() => StartWsServer(_wsCts.Token));
         _pollTimer = new Timer(_ => PollRobloxProcesses(), null, 3000, 3000);
         _pingTimer = new Timer(_ => PingAllClients(), null, 5000, 5000);
+
+        // Intercept window.open() calls and redirect to default browser
+        WebView.CoreWebView2.NewWindowRequested += (sender, args) =>
+        {
+            args.Handled = true;
+            if (!string.IsNullOrEmpty(args.Uri))
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo("cmd", $"/c start \"\" \"{args.Uri}\"")
+                    { CreateNoWindow = true, UseShellExecute = false });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[OpenUrl] Failed to open URL: {ex.Message}");
+                }
+            }
+        };
 
         // ─── File system bridge via WebView2 messages ───
         var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bridge_debug.log");
@@ -435,7 +500,9 @@ public partial class MainWindow : Window
             try
             {
                 File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] RAW: {e.WebMessageAsJson?.Substring(0, Math.Min(e.WebMessageAsJson?.Length ?? 0, 300))}\n");
-                var msg = System.Text.Json.JsonDocument.Parse(e.WebMessageAsJson);
+                var rawJson = e.WebMessageAsJson;
+                if (string.IsNullOrEmpty(rawJson)) return;
+                var msg = System.Text.Json.JsonDocument.Parse(rawJson);
                 var root = msg.RootElement;
                 if (!root.TryGetProperty("action", out var actionProp)) return;
                 var action = actionProp.GetString();
@@ -621,21 +688,51 @@ public partial class MainWindow : Window
 
                     case "executeOnClients":
                         var scriptToExec = root.TryGetProperty("script", out var sc) ? sc.GetString() ?? "" : "";
+                        var execMethod = root.TryGetProperty("method", out var methodProp) ? methodProp.GetString() ?? "scheduler" : "scheduler";
                         if (root.TryGetProperty("pids", out var pidsArr) && pidsArr.ValueKind == JsonValueKind.Array)
                         {
                             foreach (var pidEl in pidsArr.EnumerateArray())
                             {
                                 var targetPid = pidEl.GetInt32();
-                                // Prefer WebSocket for error capture, fall back to scheduler
-                                var wsClient = _wsClients.Values.FirstOrDefault(c => c.Pid == targetPid && c.Socket.State == WebSocketState.Open);
+                                // Prefer WebSocket for error capture
+                                var wsClient = _wsClients.Values.FirstOrDefault(c => c.Pid == targetPid && c.Socket != null && c.Socket.State == WebSocketState.Open);
                                 if (wsClient != null)
                                 {
                                     _ = SendExecuteToWs(wsClient, scriptToExec);
                                 }
+                                else if (execMethod == "piper")
+                                {
+                                    // Use named pipe to send script (with 5s timeout to prevent hangs)
+                                    _ = Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            var pipeTask = Task.Run(() => SynapseZAPI.SendPipeCommand("execute " + scriptToExec, targetPid));
+                                            if (await Task.WhenAny(pipeTask, Task.Delay(5000)) == pipeTask)
+                                            {
+                                                var pipeResult = pipeTask.Result;
+                                                if (pipeResult != 0)
+                                                {
+                                                    Debug.WriteLine($"[Execute:Piper] Failed for PID {targetPid}: {SynapseZAPI.GetLatestErrorMessage()}");
+                                                    PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper error: {SynapseZAPI.GetLatestErrorMessage()}");
+                                                }
+                                            }
+                                            else
+                                            {
+                                                Debug.WriteLine($"[Execute:Piper] Timeout for PID {targetPid}");
+                                                PushLogToUi($"PID {targetPid}", targetPid, "error", "Piper timeout — pipe did not respond within 5s. Try 'scheduler' method instead.");
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Debug.WriteLine($"[Execute:Piper] Exception PID {targetPid}: {ex.Message}");
+                                            PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper exception: {ex.Message}");
+                                        }
+                                    });
+                                }
                                 else
                                 {
-                                    // Wrap in xpcall so Lua runtime errors are captured and sent to the 3itx console
-                                    // The init.lua's sendLog function is used to route errors via the existing WS connection
+                                    // Scheduler: Wrap in xpcall so Lua runtime errors are captured and sent to the 3itx console
                                     var wrappedScript = $@"
 local __fn, __compErr = loadstring({EscLuaStr(scriptToExec)})
 if not __fn then
@@ -652,7 +749,6 @@ end
                                     {
                                         var errMsg = SynapseZAPI.GetLatestErrorMessage();
                                         Debug.WriteLine($"[Execute] SynapseZAPI.Execute failed for PID {targetPid}: code={execResult}, error={errMsg}");
-                                        // Push error to UI console
                                         PushLogToUi($"PID {targetPid}", targetPid, "error", $"Execute error: {errMsg}");
                                     }
                                 }
@@ -688,7 +784,7 @@ end
                             $"{{\"type\":\"enableConsoleRedirect\",\"enabled\":{(crEnabled ? "true" : "false")}}}");
                         foreach (var kv in _wsClients)
                         {
-                            if (kv.Value.Socket.State == WebSocketState.Open)
+                            if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
                             {
                                 try
                                 {
@@ -737,11 +833,11 @@ end
                             $"{{\"type\":\"enableLSP\",\"enabled\":{(lspEnabled ? "true" : "false")}}}");
                         foreach (var kv in _wsClients)
                         {
-                            if (kv.Value.Socket.State == WebSocketState.Open)
+                            if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
                             {
                                 try
                                 {
-                                    _ = kv.Value.Socket.SendAsync(
+                                    _ = kv.Value.Socket!.SendAsync(
                                         new ArraySegment<byte>(lspPayload),
                                         WebSocketMessageType.Text, true, CancellationToken.None);
                                 }
@@ -761,7 +857,7 @@ end
                             $"{{\"type\":\"execute\",\"code\":\"{fpsScript}\"}}");
                         foreach (var kv in _wsClients)
                         {
-                            if (kv.Value.Socket.State == WebSocketState.Open)
+                            if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
                             {
                                 try
                                 {
@@ -784,6 +880,180 @@ end
                         break;
                     }
 
+                    case "queueCommand":
+                    {
+                        var cmd = root.TryGetProperty("command", out var cmdProp) ? cmdProp.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(cmd))
+                        {
+                            // Send command via named pipe to all injected instances
+                            var injected = SynapseZAPI.GetSynzRobloxInstances();
+                            int successCount = 0;
+                            foreach (var proc in injected)
+                            {
+                                var pipeResult = SynapseZAPI.SendPipeCommand(cmd, proc.Id);
+                                if (pipeResult == 0) successCount++;
+                                else Debug.WriteLine($"[QueueCommand] SendPipeCommand failed for PID {proc.Id}: {SynapseZAPI.GetLatestErrorMessage()}");
+                            }
+                            result = $"{{\"ok\":true,\"sent\":{successCount},\"total\":{injected.Count}}}";
+                        }
+                        else
+                        {
+                            result = "{\"ok\":false,\"error\":\"No command specified\"}";
+                        }
+                        break;
+                    }
+
+                    case "getAccountInfo":
+                    {
+                        var hasAccount = !string.IsNullOrEmpty(SynapseZAPI.GetAccountKey());
+                        string expiryStr = "";
+                        if (hasAccount)
+                        {
+                            var expiry = SynapseZAPI.GetExpireDate();
+                            if (expiry.HasValue)
+                                expiryStr = ((DateTimeOffset)expiry.Value).ToUnixTimeSeconds().ToString();
+                        }
+
+                        // Check if Synapse Z is "down" by checking bin folder and version
+                        var binPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Synapse Z", "bin");
+                        var binExists = Directory.Exists(binPath);
+                        var version = "";
+                        if (binExists)
+                        {
+                            var versionFile = Path.Combine(binPath, "version.txt");
+                            if (File.Exists(versionFile)) version = File.ReadAllText(versionFile).Trim();
+                        }
+                        
+                        var errMsg = SynapseZAPI.GetLatestErrorMessage();
+                        var accKey = SynapseZAPI.GetAccountKey();
+                        result = $"{{\"hasAccount\":{(hasAccount ? "true" : "false")},\"expiry\":\"{expiryStr}\",\"version\":\"{version}\",\"binExists\":{(binExists ? "true" : "false")},\"accountKey\":\"{accKey.Replace("\"", "\\\"")}\",\"error\":\"{errMsg.Replace("\"", "\\\"")}\"}}";
+                        break;
+                    }
+
+                    case "redeemKey":
+                    {
+                        var license = root.TryGetProperty("license", out var licProp) ? licProp.GetString() ?? "" : "";
+                        var redeemResult = SynapseZAPI.Redeem(license);
+                        var redeemErr = SynapseZAPI.GetLatestErrorMessage();
+                        result = $"{{\"code\":{redeemResult},\"error\":\"{redeemErr.Replace("\"", "\\\"")}\"}}";
+                        break;
+                    }
+
+                    case "resetHwid":
+                    {
+                        var hwidResult = SynapseZAPI.ResetHwid();
+                        var hwidErr = SynapseZAPI.GetLatestErrorMessage();
+                        result = $"{{\"code\":{hwidResult},\"error\":\"{hwidErr.Replace("\"", "\\\"")}\"}}";
+                        break;
+                    }
+
+                    case "createAccount":
+                    {
+                        var createLicense = root.TryGetProperty("license", out var clProp) ? clProp.GetString() ?? "" : "";
+                        var accKey = SynapseZAPI.CreateAccount(createLicense);
+                        var createErr = SynapseZAPI.GetLatestErrorMessage();
+                        var isError = accKey.StartsWith("-");
+                        result = $"{{\"ok\":{(!isError ? "true" : "false")},\"error\":\"{createErr.Replace("\"", "\\\"")}\"}}";
+                        break;
+                    }
+
+                    case "ensureDexIcons":
+                    {
+                        var dexIconsDir = Path.Combine(_dataPath, "DexIcons");
+                        if (Directory.Exists(dexIconsDir) && Directory.GetFiles(dexIconsDir, "*.png").Length > 0)
+                        {
+                            result = "{\"ok\":true,\"alreadyExists\":true}";
+                        }
+                        else
+                        {
+                            try
+                            {
+                                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                                var localZip = Path.Combine(exeDir, "Resources", "ExplorerIcons.zip");
+                                if (!File.Exists(localZip))
+                                {
+                                    result = $"{{\"ok\":false,\"error\":\"ExplorerIcons.zip not found in Resources\"}}";
+                                    break;
+                                }
+                                if (Directory.Exists(dexIconsDir)) Directory.Delete(dexIconsDir, true);
+                                ZipFile.ExtractToDirectory(localZip, dexIconsDir);
+                                result = "{\"ok\":true}";
+                            }
+                            catch (Exception ex)
+                            {
+                                result = $"{{\"ok\":false,\"error\":\"{Esc(ex.Message)}\"}}";
+                            }
+                        }
+                        break;
+                    }
+
+                    case "getDexIcons":
+                    {
+                        var iconsDir = Path.Combine(_dataPath, "DexIcons");
+                        if (!Directory.Exists(iconsDir))
+                        {
+                            result = "{\"ok\":false,\"error\":\"DexIcons folder not found\"}";
+                        }
+                        else
+                        {
+                            var sb2 = new StringBuilder("{\"ok\":true,\"icons\":{");
+                            bool first2 = true;
+                            // Search recursively for PNG files
+                            foreach (var file in Directory.GetFiles(iconsDir, "*.png", SearchOption.AllDirectories))
+                            {
+                                var className = Path.GetFileNameWithoutExtension(file);
+                                var b64 = Convert.ToBase64String(File.ReadAllBytes(file));
+                                if (!first2) sb2.Append(',');
+                                first2 = false;
+                                sb2.Append($"\"{Esc(className)}\":\"data:image/png;base64,{b64}\"");
+                            }
+                            sb2.Append("}}");
+                            result = sb2.ToString();
+                        }
+                        break;
+                    }
+
+                    case "sendDexMessage":
+                    {
+                        var dexPid = root.TryGetProperty("pid", out var dexPidProp) ? dexPidProp.GetInt32() : 0;
+                        var dexMsg = root.TryGetProperty("message", out var dexMsgProp) ? dexMsgProp.GetRawText() : "{}";
+                        if (dexPid > 0)
+                        {
+                            var target = _wsClients.Values.FirstOrDefault(c => c.Pid == dexPid && c.Socket != null && c.Socket.State == WebSocketState.Open);
+                            if (target != null)
+                            {
+                                var msgBytes = Encoding.UTF8.GetBytes(dexMsg);
+                                await target.Socket!.SendAsync(new ArraySegment<byte>(msgBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                                result = "{\"ok\":true}";
+                            }
+                            else
+                            {
+                                result = "{\"ok\":false,\"error\":\"Client not connected\"}";
+                            }
+                        }
+                        else
+                        {
+                            result = "{\"ok\":false,\"error\":\"Invalid PID\"}";
+                        }
+                        break;
+                    }
+
+                    case "openUrl":
+                    {
+                        var url = root.TryGetProperty("url", out var urlProp) ? urlProp.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(url))
+                        {
+                            Process.Start(new ProcessStartInfo("cmd", $"/c start \"\" \"{url}\"")
+                            { CreateNoWindow = true, UseShellExecute = false });
+                            result = "{\"ok\":true}";
+                        }
+                        else
+                        {
+                            result = "{\"ok\":false,\"error\":\"No URL specified\"}";
+                        }
+                        break;
+                    }
+
                     case "openMonitor":
                     {
                         var capPid = root.TryGetProperty("pid", out var capPidProp) ? capPidProp.GetInt32() : 0;
@@ -792,7 +1062,7 @@ end
                         {
                             try
                             {
-                                string monitorError = null;
+                                string? monitorError = null;
                                 Dispatcher.Invoke(() =>
                                 {
                                     try
@@ -839,8 +1109,111 @@ end
                         break;
                     }
 
+                    case "openDexExplorer":
+                    {
+                        var dexExpPid = root.TryGetProperty("pid", out var dexExpPidProp) ? dexExpPidProp.GetInt32() : 0;
+                        var dexExpUser = root.TryGetProperty("username", out var dexExpUserProp) ? dexExpUserProp.GetString() ?? "Unknown" : "Unknown";
+                        if (dexExpPid > 0)
+                        {
+                            string? dexError = null;
+                            Dispatcher.Invoke(() =>
+                            {
+                                try
+                                {
+                                    // Close existing DEX for this PID
+                                    if (_dexWindows.TryGetValue(dexExpPid, out var existing))
+                                    {
+                                        try { existing.Close(); } catch { }
+                                        _dexWindows.Remove(dexExpPid);
+                                    }
+
+                                    var dexWin = new DexWindow(dexExpPid, dexExpUser, ServerUrl, _dataPath);
+                                    dexWin.Closed += (_, _) => _dexWindows.Remove(dexExpPid);
+                                    _dexWindows[dexExpPid] = dexWin;
+                                    dexWin.Show();
+                                }
+                                catch (Exception uiEx)
+                                {
+                                    dexError = uiEx.Message;
+                                }
+                            });
+                            result = dexError == null
+                                ? "{\"ok\":true}"
+                                : JsonSerializer.Serialize(new { ok = false, error = dexError });
+                        }
+                        else
+                        {
+                            result = "{\"ok\":false,\"error\":\"Invalid PID\"}";
+                        }
+                        break;
+                    }
+
+                    case "openConsoleWindow":
+                    {
+                        var linesJson = root.TryGetProperty("lines", out var linesProp) ? linesProp.GetString() ?? "[]" : "[]";
+                        Dispatcher.Invoke(() =>
+                        {
+                            try
+                            {
+                                // Close existing if any
+                                if (_consoleWindow != null)
+                                {
+                                    try { _consoleWindow.Close(); } catch { }
+                                    _consoleWindow = null;
+                                }
+
+                                _consoleWindow = new ConsoleWindow(ServerUrl);
+                                _consoleWindow.ConsoleClosed += () =>
+                                {
+                                    _consoleWindow = null;
+                                    // Notify the main WebView to re-dock the console
+                                    Dispatcher.InvokeAsync(async () =>
+                                    {
+                                        try
+                                        {
+                                            await WebView.CoreWebView2.ExecuteScriptAsync(
+                                                "if (typeof window.__consoleWindowClosed === 'function') window.__consoleWindowClosed();");
+                                        }
+                                        catch { }
+                                    });
+                                };
+                                _consoleWindow.Show();
+
+                                // Send existing lines after a short delay (WebView2 needs to load)
+                                var lines = linesJson;
+                                Task.Run(async () =>
+                                {
+                                    await Task.Delay(1500);
+                                    Dispatcher.Invoke(() => _consoleWindow?.SendAllLines(lines));
+                                });
+                            }
+                            catch { }
+                        });
+                        result = "{\"ok\":true}";
+                        break;
+                    }
+
+                    case "forwardConsoleLine":
+                    {
+                        var lineJson = root.TryGetProperty("line", out var lineProp) ? lineProp.GetString() ?? "" : "";
+                        if (_consoleWindow != null && !string.IsNullOrEmpty(lineJson))
+                        {
+                            _consoleWindow.SendConsoleLine(lineJson);
+                        }
+                        result = "{\"ok\":true}";
+                        break;
+                    }
+
+                    case "clearConsoleWindow":
+                    {
+                        _consoleWindow?.ClearConsole();
+                        result = "{\"ok\":true}";
+                        break;
+                    }
+
                     case "setWindowTitle":
                     {
+
                         var titlePid = root.TryGetProperty("pid", out var titlePidProp) ? titlePidProp.GetInt32() : 0;
                         var newTitle = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : "";
                         if (titlePid > 0 && !string.IsNullOrEmpty(newTitle))
@@ -1010,18 +1383,42 @@ end
     }
 
     /* ─── Loading UI ─── */
-    private readonly System.Windows.Shapes.Ellipse[] _stepDots = new System.Windows.Shapes.Ellipse[5];
-    private readonly System.Windows.Controls.TextBlock[] _stepLabels = new System.Windows.Controls.TextBlock[5];
-    private readonly System.Windows.Controls.Border[] _stepLines = new System.Windows.Controls.Border[4];
-    private bool _stepsInitialized;
 
-    private void InitStepRefs()
+
+    private int _targetPct = 0;
+    private int _currentPct = 0;
+    private int _animationToken = 0;
+
+    private async void UpdateProgress(int pct)
     {
-        if (_stepsInitialized) return;
-        _stepDots[0] = Step1Dot; _stepDots[1] = Step2Dot; _stepDots[2] = Step3Dot; _stepDots[3] = Step4Dot; _stepDots[4] = Step5Dot;
-        _stepLabels[0] = Step1Label; _stepLabels[1] = Step2Label; _stepLabels[2] = Step3Label; _stepLabels[3] = Step4Label; _stepLabels[4] = Step5Label;
-        _stepLines[0] = Line12; _stepLines[1] = Line23; _stepLines[2] = Line34; _stepLines[3] = Line45;
-        _stepsInitialized = true;
+        _targetPct = Math.Clamp(pct, 0, 100);
+
+        // Update the blocks immediately
+        int filled = _targetPct / 10;
+        for (int i = 0; i < 10; i++)
+        {
+            _progressBlocks[i].Fill = new System.Windows.Media.SolidColorBrush(
+                i < filled ? System.Windows.Media.Colors.White : System.Windows.Media.Colors.Black);
+        }
+
+        int currentToken = unchecked(++_animationToken);
+
+        while (_currentPct != _targetPct)
+        {
+            if (_animationToken != currentToken) return; // Cancel obsolete loop
+
+            int step = _targetPct > _currentPct ? 1 : -1;
+            int diff = Math.Abs(_targetPct - _currentPct);
+            if (diff > 20) _currentPct += step * 3;
+            else if (diff > 10) _currentPct += step * 2;
+            else _currentPct += step;
+
+            if (step > 0 && _currentPct > _targetPct) _currentPct = _targetPct;
+            if (step < 0 && _currentPct < _targetPct) _currentPct = _targetPct;
+
+            ProgressNumber.Text = _currentPct.ToString() + "%";
+            await Task.Delay(20);
+        }
     }
 
     /// <summary>Set the active step (1-5). Steps before it become completed (green), the active step pulses white.</summary>
@@ -1029,56 +1426,44 @@ end
     {
         Dispatcher.Invoke(() =>
         {
-            InitStepRefs();
-            StatusText.Text = statusText;
+            // Sync pixel progress bar with step
+            int[] stepPct = { 0, 10, 20, 30, 40, 90, 100 };
+            if (step >= 0 && step < stepPct.Length) UpdateProgress(stepPct[step]);
 
-            var completedFill = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#22c55e")!);
-            var completedStroke = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#16a34a")!);
-            var completedLine = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#22c55e")!);
-            var completedLabel = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#86efac")!);
-            var activeFill = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#e4e4e7")!);
-            var activeStroke = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#ffffff")!);
-            var activeLabel = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#e4e4e7")!);
-            var inactiveFill = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#2a2a30")!);
-            var inactiveStroke = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#3f3f46")!);
-            var inactiveLabel = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#52525b")!);
-            var inactiveLine = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#2a2a30")!);
+            var uText = statusText.ToUpper();
+            if (StatusTextVisible.Text == uText) return;
 
-            for (int i = 0; i < 5; i++)
+            // Odometer animation for status text
+            var slideOut = new DoubleAnimation(0, 20, TimeSpan.FromMilliseconds(120));
+            slideOut.Completed += (s, e) =>
             {
-                if (i < step - 1)
-                {
-                    // Completed
-                    _stepDots[i].Fill = completedFill;
-                    _stepDots[i].Stroke = completedStroke;
-                    _stepLabels[i].Foreground = completedLabel;
-                }
-                else if (i == step - 1)
-                {
-                    // Active
-                    _stepDots[i].Fill = activeFill;
-                    _stepDots[i].Stroke = activeStroke;
-                    _stepLabels[i].Foreground = activeLabel;
-                }
-                else
-                {
-                    // Inactive
-                    _stepDots[i].Fill = inactiveFill;
-                    _stepDots[i].Stroke = inactiveStroke;
-                    _stepLabels[i].Foreground = inactiveLabel;
-                }
-            }
-
-            for (int i = 0; i < 4; i++)
-            {
-                _stepLines[i].Background = i < step - 1 ? completedLine : inactiveLine;
-            }
+                StatusTextVisible.Text = uText;
+                var slideIn = new DoubleAnimation(-20, 0, TimeSpan.FromMilliseconds(120));
+                StatusTextVisibleTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideIn);
+            };
+            StatusTextVisibleTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideOut);
         });
     }
 
     private void UpdateStatus(string text, int pct)
     {
-        Dispatcher.Invoke(() => StatusText.Text = text);
+        Dispatcher.Invoke(() =>
+        {
+            UpdateProgress(pct);
+
+            var uText = text.ToUpper();
+            if (StatusTextVisible.Text == uText) return;
+
+            // Odometer animation for status text
+            var slideOut = new DoubleAnimation(0, 20, TimeSpan.FromMilliseconds(120));
+            slideOut.Completed += (s, e) =>
+            {
+                StatusTextVisible.Text = uText;
+                var slideIn = new DoubleAnimation(-20, 0, TimeSpan.FromMilliseconds(120));
+                StatusTextVisibleTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideIn);
+            };
+            StatusTextVisibleTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideOut);
+        });
     }
 
     /* ═══════════════════════════════════════════════════════════════════
@@ -1146,6 +1531,9 @@ end
                 clientId = $"ws_{client.Pid}";
                 _wsClients[clientId] = client;
                 Debug.WriteLine($"[WS] Client connected: {client.Username} (PID {client.Pid})");
+                // Notify DEX window of reconnection (e.g. player rejoined a game)
+                if (_dexWindows.TryGetValue(client.Pid, out var dexWin))
+                    dexWin.NotifyReconnected();
                 // Fetch avatar URL asynchronously
                 _ = Task.Run(async () =>
                 {
@@ -1154,9 +1542,10 @@ end
                 });
                 PushClientListToUi();
 
-                // Send current settings to newly connected client
+                // Send current settings to newly connected client (small delay ensures Lua receive loop is ready)
                 try
                 {
+                    await Task.Delay(500, ct);
                     if (_consoleRedirectEnabled)
                     {
                         var crMsg = Encoding.UTF8.GetBytes("{\"type\":\"enableConsoleRedirect\",\"enabled\":true}");
@@ -1204,6 +1593,9 @@ end
                             {
                                 cl.Status = "connected";
                                 PushClientListToUi();
+                                // Notify DEX window of reconnection
+                                if (_dexWindows.TryGetValue(cl.Pid, out var dexWin))
+                                    dexWin.NotifyReconnected();
                             }
                         }
                         else if (typeStr == "log" && _wsClients.TryGetValue(clientId, out var logClient))
@@ -1215,6 +1607,12 @@ end
                         else if (typeStr != null && typeStr.StartsWith("lsp_") && _wsClients.TryGetValue(clientId, out var lspClient))
                         {
                             PushLspToUi(lspClient.Pid, incoming);
+                        }
+                        else if (typeStr != null && typeStr.StartsWith("dex_") && _wsClients.TryGetValue(clientId, out var dexClient))
+                        {
+                            // Only process DEX messages if a DEX window is open for this PID
+                            if (_dexWindows.ContainsKey(dexClient.Pid))
+                                PushDexToUi(dexClient.Pid, incoming);
                         }
                     }
                 }
@@ -1232,6 +1630,9 @@ end
             {
                 _injectedPids.Remove(removed.Pid);
                 Debug.WriteLine($"[WS] Client disconnected: {clientId} (PID {removed.Pid}) — cleared for re-injection");
+                // Instantly notify DEX window of disconnect
+                if (_dexWindows.TryGetValue(removed.Pid, out var dexWin))
+                    dexWin.NotifyDisconnected();
             }
             PushClientListToUi();
             try { ws.Dispose(); } catch { }
@@ -1241,16 +1642,113 @@ end
     /// Send "execute" command to a specific WS client
     private async Task SendExecuteToWs(WsClient client, string script)
     {
-        if (client.Socket.State != WebSocketState.Open) return;
+        if (client.Socket == null || client.Socket.State != WebSocketState.Open) return;
         var payload = JsonSerializer.Serialize(new { type = "execute", script });
         var bytes = Encoding.UTF8.GetBytes(payload);
         try
         {
-            await client.Socket.SendAsync(
+            await client.Socket!.SendAsync(
                 new ArraySegment<byte>(bytes),
                 WebSocketMessageType.Text, true, CancellationToken.None);
         }
         catch { }
+    }
+
+    /// Public method for DexWindow to send WS messages to clients
+    public async Task<string> SendDexMessageAsync(int pid, string msgJson)
+    {
+        var target = _wsClients.Values.FirstOrDefault(c => c.Pid == pid && c.Socket != null && c.Socket.State == WebSocketState.Open);
+        if (target == null) return "{\"ok\":false,\"error\":\"Client not connected\"}";
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(msgJson);
+            await target.Socket!.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            return "{\"ok\":true}";
+        }
+        catch (Exception ex)
+        {
+            return $"{{\"ok\":false,\"error\":\"{Esc(ex.Message)}\"}}";
+        }
+    }
+
+    /// Execute a script on specific Roblox clients (used by DexWindow relay)
+    public void ExecuteOnClients(int[] pids, string script, string method = "scheduler")
+    {
+        foreach (var targetPid in pids)
+        {
+            var wsClient = _wsClients.Values.FirstOrDefault(c => c.Pid == targetPid && c.Socket != null && c.Socket.State == WebSocketState.Open);
+            if (wsClient != null)
+            {
+                _ = SendExecuteToWs(wsClient, script);
+            }
+            else if (method == "piper")
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var pipeTask = Task.Run(() => SynapseZAPI.SendPipeCommand("execute " + script, targetPid));
+                        if (await Task.WhenAny(pipeTask, Task.Delay(5000)) == pipeTask)
+                        {
+                            var pipeResult = pipeTask.Result;
+                            if (pipeResult != 0)
+                            {
+                                Debug.WriteLine($"[Execute:Piper] Failed for PID {targetPid}: {SynapseZAPI.GetLatestErrorMessage()}");
+                                PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper error: {SynapseZAPI.GetLatestErrorMessage()}");
+                            }
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[Execute:Piper] Timeout for PID {targetPid}");
+                            PushLogToUi($"PID {targetPid}", targetPid, "error", "Piper timeout — pipe did not respond within 5s.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Execute:Piper] Exception PID {targetPid}: {ex.Message}");
+                        PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper exception: {ex.Message}");
+                    }
+                });
+            }
+            else
+            {
+                var wrappedScript = $@"
+local __fn, __compErr = loadstring({EscLuaStr(script)})
+if not __fn then
+    if error then error(tostring(__compErr)) end
+else
+    local __ok, __runErr = xpcall(__fn, function(e) return debug.traceback(e, 2) end)
+    if not __ok then
+        if error then error(tostring(__runErr)) end
+    end
+end
+";
+                var execResult = SynapseZAPI.Execute(wrappedScript, targetPid);
+                if (execResult != 0)
+                {
+                    var errMsg = SynapseZAPI.GetLatestErrorMessage();
+                    Debug.WriteLine($"[Execute] SynapseZAPI.Execute failed for PID {targetPid}: code={execResult}, error={errMsg}");
+                    PushLogToUi($"PID {targetPid}", targetPid, "error", $"Execute error: {errMsg}");
+                }
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// Called by ConsoleWindow when the popup requests to clear the main console.
+    /// </summary>
+    public void ClearConsoleFromPopup()
+    {
+        Dispatcher.InvokeAsync(async () =>
+        {
+            try
+            {
+                await WebView.CoreWebView2.ExecuteScriptAsync(
+                    "if (typeof window.__clearConsoleFromPopup === 'function') window.__clearConsoleFromPopup();");
+            }
+            catch { }
+        });
     }
 
     /// Push updated client list to WebView2 UI
@@ -1269,6 +1767,7 @@ end
     }
 
     /// Push a log entry from a Roblox client to the WebView2 console
+    private int _consoleLineId = 0;
     private void PushLogToUi(string clientName, int pid, string level, string message)
     {
         var escapedMsg = Esc(message);
@@ -1282,6 +1781,24 @@ end
             }
             catch { }
         });
+
+        // Also forward directly to ConsoleWindow if it's open
+        if (_consoleWindow != null)
+        {
+            var typeMap = level switch
+            {
+                "error" => "error",
+                "warning" or "warn" => "warning",
+                "info" or "print" => "info",
+                _ => ""
+            };
+            var now = DateTime.Now;
+            var ts = $"{now:HH}:{now:mm}:{now:ss}";
+            var lineId = _consoleLineId++;
+            // Build a ConsoleLine JSON matching the React format
+            var lineJson = $"{{\"id\":{lineId},\"timestamp\":\"{ts}\",\"message\":\"{Esc(message)}\",\"type\":\"{typeMap}\",\"client\":\"{Esc(clientName)}\"}}";
+            _consoleWindow.SendConsoleLine(lineJson);
+        }
     }
 
     /// Push LSP data (game tree) from a Roblox client to the WebView2 UI
@@ -1294,6 +1811,62 @@ end
             {
                 await WebView.CoreWebView2.ExecuteScriptAsync(
                     $"typeof window.__onLspData === 'function' && window.__onLspData({pid},{jsPayload})");
+            }
+            catch { }
+        });
+    }
+
+    /// Push DEX data from a Roblox client to the DEX Window's WebView2
+    private void PushDexToUi(int pid, string rawJson)
+    {
+        var jsPayload = System.Text.Json.JsonSerializer.Serialize(rawJson);
+        
+        Dispatcher.InvokeAsync(async () =>
+        {
+            try
+            {
+                // Send to the DEX window for this PID
+                var hasDexWin = _dexWindows.TryGetValue(pid, out var dexWin);
+                
+                if (hasDexWin && dexWin?.DexWebView?.CoreWebView2 != null)
+                {
+                    // Intercept decompile/dump results — route to ScriptViewerWindow
+                    if (dexWin.HandleDexData(rawJson))
+                    {
+                        return; // Handled by ScriptViewerWindow, don't forward to WebView
+                    }
+
+                    var js = $"typeof window.__onDexData === 'function' && window.__onDexData({pid},{jsPayload})";
+                    await dexWin.DexWebView.CoreWebView2.ExecuteScriptAsync(js);
+                }
+                
+
+            }
+            catch { }
+        });
+    }
+
+    /// <summary>
+    /// Relay a JSON message to a Roblox client via WebSocket (used by ScriptViewerWindow for decompile/dump requests).
+    /// </summary>
+    public void RelayDexMessage(int pid, string jsonMsg)
+    {
+        _ = SendDexMessageAsync(pid, jsonMsg);
+    }
+
+    /// <summary>
+    /// Insert code into the main editor by creating a new tab via WebView2 JS injection.
+    /// </summary>
+    public void InsertToEditor(string name, string content)
+    {
+        Dispatcher.InvokeAsync(async () =>
+        {
+            try
+            {
+                var escapedName = System.Text.Json.JsonSerializer.Serialize(name);
+                var escapedContent = System.Text.Json.JsonSerializer.Serialize(content);
+                var js = $"typeof window.__onDexInsertToEditor === 'function' && window.__onDexInsertToEditor({escapedName}, {escapedContent})";
+                await WebView.CoreWebView2.ExecuteScriptAsync(js);
             }
             catch { }
         });
@@ -1325,7 +1898,7 @@ end
             sb.Append($"{{\"id\":\"pid_{kv.Key}\",\"pid\":{kv.Key},\"userId\":0,");
             sb.Append($"\"username\":\"PID {kv.Key}\",\"displayName\":\"Roblox Instance\",");
             sb.Append($"\"placeId\":0,\"placeName\":\"\",");
-            sb.Append($"\"jobId\":\"\",\"status\":\"connected\",");
+            sb.Append($"\"jobId\":\"\",\"status\":\"menu\",");
             sb.Append($"\"avatarUrl\":\"\",\"pidOnly\":true}}");
         }
         sb.Append(']');
@@ -1381,6 +1954,8 @@ end
     private static bool IsSynz(int pid) => SynapseZAPI.IsSynz(pid);
     private static Process[] GetRobloxProcesses() => SynapseZAPI.GetRobloxProcesses();
 
+
+    private static void EnsureBetaAppExecution() { }
     /* ─── Process Polling — detect + auto-inject init script ─── */
     private void PollRobloxProcesses()
     {
@@ -1391,14 +1966,37 @@ end
             var wsConnectedPids = new HashSet<int>(_wsClients.Values.Select(c => c.Pid));
 
             // Auto-inject init script into new injected instances
+            // Only skip PIDs that have a live WebSocket connection (confirmed via hello)
             foreach (var proc in procs)
             {
                 var pid = proc.Id;
-                if (_injectedPids.Contains(pid)) continue;
-                if (!SynapseZAPI.IsSynz(pid)) continue;
+                // Skip if we already have a live WS connection from this PID
+                if (wsConnectedPids.Contains(pid)) continue;
+                
+                var isSynz = SynapseZAPI.IsSynz(pid);
+                var logLine = $"[Poll] PID {pid}: IsSynz={isSynz}, alreadyInjected={_injectedPids.Contains(pid)}, wsConnected={wsConnectedPids.Contains(pid)}";
+                Debug.WriteLine(logLine);
+                try { File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "inject_log.txt"), logLine + "\n"); } catch { }
+                if (!isSynz) continue;
 
+                // Throttle: don't spam injection — only retry every ~5 seconds
+                if (_injectedPids.Contains(pid)) continue;
                 _injectedPids.Add(pid);
+
+                // Schedule removal from _injectedPids after 5s so we retry if it failed
+                var capturedPid = pid;
+                Task.Delay(5000).ContinueWith(_ =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        // If still no WS connection, allow retry
+                        var stillConnected = _wsClients.Values.Any(c => c.Pid == capturedPid);
+                        if (!stillConnected) _injectedPids.Remove(capturedPid);
+                    });
+                });
+
                 var initScript = GetInitScript(pid);
+                Debug.WriteLine($"[Poll] Injecting init script to PID {pid} (script length: {initScript.Length})");
                 var injectResult = SynapseZAPI.Execute(initScript, pid);
                 if (injectResult != 0)
                 {
@@ -1411,7 +2009,7 @@ end
                 }
             }
 
-            // PID-based fallback: if a SynZ instance has no WS client, track it as PID-only
+            // PID-based fallback: if a SynZ instance has no WS client, track it as PID-only (In Menu)
             bool pidChanged = false;
             foreach (var proc in procs)
             {
@@ -1422,7 +2020,7 @@ end
                 {
                     _pidOnlyClients[pid] = new PidOnlyClient { Pid = pid };
                     pidChanged = true;
-                    Debug.WriteLine($"[Poll] Added PID-only fallback client: {pid}");
+                    Debug.WriteLine($"[Poll] Added PID-only client (In Menu): {pid}");
                 }
             }
 
@@ -1448,7 +2046,7 @@ end
                     _wsClients.TryRemove(kv.Key, out var removed);
                     if (removed != null)
                     {
-                        try { removed.Socket.Abort(); } catch { }
+                        try { removed.Socket?.Abort(); } catch { }
                         Debug.WriteLine($"[Poll] Removed dead client: {kv.Key} (PID {removed.Pid})");
                         changed = true;
                     }
@@ -1469,12 +2067,15 @@ end
         {
             var client = kv.Value;
 
+            // Skip API2 clients (no WebSocket)
+            if (client.Socket == null) continue;
+
             // Send ping
-            if (client.Socket.State == WebSocketState.Open)
+            if (client.Socket != null && client.Socket.State == WebSocketState.Open)
             {
                 try
                 {
-                    client.Socket.SendAsync(
+                    client.Socket!.SendAsync(
                         new ArraySegment<byte>(pingBytes),
                         WebSocketMessageType.Text, true, CancellationToken.None);
                 }
@@ -1497,15 +2098,21 @@ end
                         client.Status = "menu";
                         _injectedPids.Remove(client.Pid); // Allow re-injection on rejoin
                         changed = true;
+                        // Notify DEX window of disconnect
+                        if (_dexWindows.TryGetValue(client.Pid, out var dexWin))
+                            dexWin.NotifyDisconnected();
                     }
                 }
                 else
                 {
                     // PID dead → remove client
                     _wsClients.TryRemove(kv.Key, out _);
-                    try { client.Socket.Abort(); } catch { }
+                    try { client.Socket?.Abort(); } catch { }
                     Debug.WriteLine($"[Ping] Removed dead client: {kv.Key}");
                     changed = true;
+                    // Notify DEX window of disconnect
+                    if (_dexWindows.TryGetValue(client.Pid, out var dexWin2))
+                        dexWin2.NotifyDisconnected();
                 }
             }
         }
@@ -1609,10 +2216,11 @@ ws.OnMessage:Connect(function(m) local ok,d=pcall(HttpService.JSONDecode,HttpSer
         _wsCts.Cancel();
         _pollTimer?.Dispose();
         _pingTimer?.Dispose();
+
         try { _wsListener?.Stop(); } catch { }
         foreach (var kv in _wsClients)
         {
-            try { kv.Value.Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "shutdown", CancellationToken.None); }
+            try { kv.Value.Socket?.CloseAsync(WebSocketCloseStatus.NormalClosure, "shutdown", CancellationToken.None); }
             catch { }
         }
         base.OnClosed(e);

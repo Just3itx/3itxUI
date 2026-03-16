@@ -490,7 +490,7 @@ function registerLuauCompletions(monaco: Monaco) {
             }
 
             // Handle: game:GetService("Players"). | workspace.Part. | Players.
-            const getServiceMatch = textBefore.match(/(\w+):GetService\(\s*["'](\w+)["']\s*\)\s*([.:])$/);
+            const getServiceMatch = textBefore.match(/(\w+):GetService\(\s*["'](\w+)["']\s*\)\s*([.:])\s*\w*$/);
             const simpleMatch = textBefore.match(/([\w.]+)\s*([.:])\s*$/);
 
             let resolvedClass = "";
@@ -759,6 +759,9 @@ export interface EditorTab {
     id: number;
     name: string;
     content: string;
+    section?: "scripts" | "autoexec";
+    /** Original filename on disk (may differ from display name when tabs are deduplicated) */
+    fileName?: string;
 }
 
 interface EditorPanelProps {
@@ -778,6 +781,7 @@ interface EditorPanelProps {
     wordWrap?: boolean;
     lineNumbers?: boolean;
     bracketPairColorization?: boolean;
+    autoSuggestions?: boolean;
 }
 
 export default function EditorPanel({
@@ -797,6 +801,7 @@ export default function EditorPanel({
     wordWrap = false,
     lineNumbers = true,
     bracketPairColorization = true,
+    autoSuggestions = true,
 }: EditorPanelProps) {
     const [editingTabId, setEditingTabId] = useState<number | null>(null);
     const [editingName, setEditingName] = useState("");
@@ -876,12 +881,20 @@ export default function EditorPanel({
                 onContentChange(activeTabIdRef.current, value);
             }, 50); // 50ms debounce — fast enough for UI, avoids storm
 
-            // Auto-trigger suggestions when typing or deleting inside a word
-            const pos = editor.getPosition();
-            if (pos) {
-                const word = editor.getModel()?.getWordAtPosition(pos);
-                if (word && word.word.length >= 1) {
-                    editor.trigger("auto", "editor.action.triggerSuggest", {});
+            // Auto-trigger suggestions when word is 2+ chars and cursor is at an open position
+            if (autoSuggestions) {
+                const pos = editor.getPosition();
+                if (pos) {
+                    const word = editor.getModel()?.getWordAtPosition(pos);
+                    if (word && word.word.length >= 2) {
+                        // Only trigger if cursor is at end of the word (not in the middle of existing code)
+                        const lineContent = editor.getModel()?.getLineContent(pos.lineNumber) || "";
+                        const charAfter = lineContent[pos.column - 1] || "";
+                        // Don't auto-suggest if next char is a letter/digit (cursor is inside or right before a word)
+                        if (!charAfter || /^[\s)\]},;]/.test(charAfter)) {
+                            editor.trigger("auto", "editor.action.triggerSuggest", {});
+                        }
+                    }
                 }
             }
         });
@@ -899,6 +912,23 @@ export default function EditorPanel({
             prevTabIdRef.current = activeTabId;
         }
     }, [activeTabId, activeTab]);
+
+    // Sync editor when content is loaded asynchronously (e.g., readFile from disk)
+    // This catches the case where tab is created with empty content and file loads in background
+    const prevContentRef = useRef<string>("");
+    useEffect(() => {
+        if (!editorRef.current || !activeTab) return;
+        const model = editorRef.current.getModel();
+        if (!model) return;
+        const editorContent = model.getValue();
+        // Only update if editor is empty/stale but tab now has real content from disk
+        if (editorContent === "" && activeTab.content !== "" && activeTab.content !== prevContentRef.current) {
+            model.setValue(activeTab.content);
+            // Mark this as the saved/clean state so the unsaved dot doesn't show
+            savedContentRef.current[activeTab.id] = activeTab.content;
+        }
+        prevContentRef.current = activeTab.content;
+    }, [activeTab?.content, activeTab]);
 
     return (
         <div className="flex flex-col flex-1 overflow-hidden">
@@ -998,8 +1028,12 @@ export default function EditorPanel({
                         wordWrap: wordWrap ? "on" : "off",
                         automaticLayout: true,
                         contextmenu: true,
-                        suggestOnTriggerCharacters: true,
-                        quickSuggestions: { other: "on", comments: "off", strings: "on" },
+                        suggestOnTriggerCharacters: autoSuggestions,
+                        quickSuggestions: autoSuggestions
+                            ? { other: "on", comments: "off", strings: "on" }
+                            : false,
+                        wordBasedSuggestions: "off",
+                        snippetsPreventQuickSuggestions: false,
                         ...({ "bracketPairColorization.enabled": bracketPairColorization } as any),
                         guides: {
                             bracketPairs: bracketPairColorization,
@@ -1007,9 +1041,11 @@ export default function EditorPanel({
                         },
                         suggest: {
                             showIcons: true,
-                            showStatusBar: true,
+                            showStatusBar: false,
                             preview: true,
+                            filterGraceful: false,
                         },
+                        acceptSuggestionOnEnter: "off",
                     }}
                 />
             </div>

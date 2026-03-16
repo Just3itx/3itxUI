@@ -22,8 +22,21 @@
 
   <ItemGroup>
     <None Update="Resources\init.lua">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\loading.html">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\ExplorerIcons.zip">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Fonts\JetBrainsMono-Regular.ttf" />
+    <Resource Include="Fonts\JetBrainsMono-Medium.ttf" />
+    <Resource Include="Fonts\JetBrainsMono-SemiBold.ttf" />
+    <Resource Include="Fonts\JetBrainsMono-Bold.ttf" />
   </ItemGroup>
 
 </Project>

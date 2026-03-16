@@ -336,7 +336,7 @@ export default function ExplorerPanel({
     /* Render tree node */
     const renderNode = (node: ExplorerNode, depth: number, section: "scripts" | "autoexec") => {
         const isEditing = editingId === node.id;
-        const isActive = node.type === "file" && activeFile === node.name;
+        const isActive = node.type === "file" && activeFile === `${section}:${node.name}`;
         const isDragOver = dragOverId === node.id;
 
         return (

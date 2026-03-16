@@ -1,40 +1,26 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
     Search,
     Filter,
     Trash2,
-    ChevronUp,
-    ChevronDown,
     XCircle,
     AlertTriangle,
     Info,
     CheckCircle2,
     CircleDot,
     X,
-    ExternalLink,
-    GripHorizontal,
+    ArrowLeftToLine,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-export interface ConsoleLine {
+interface ConsoleLine {
     id: number;
     timestamp: string;
     message: string;
     type: "" | "info" | "success" | "warning" | "error";
     client?: string;
-}
-
-interface ConsolePanelProps {
-    lines: ConsoleLine[];
-    onClear: () => void;
-    collapsed: boolean;
-    onToggleCollapse: () => void;
-    height: number;
-    onHeightChange: (h: number) => void;
-    onPopOut?: () => void;
 }
 
 const typeColors: Record<string, string> = {
@@ -55,14 +41,35 @@ const typeIcons: Record<string, React.ReactNode> = {
 
 type FilterType = "all" | "info" | "success" | "warning" | "error" | "log";
 
-export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollapse, height, onHeightChange, onPopOut }: ConsolePanelProps) {
+export default function ConsolePage() {
+    const [lines, setLines] = useState<ConsoleLine[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [showSearch, setShowSearch] = useState(false);
     const [filter, setFilter] = useState<FilterType>("all");
     const [showFilter, setShowFilter] = useState(false);
     const [clientFilter, setClientFilter] = useState<string>("all");
     const scrollRef = useRef<HTMLDivElement>(null);
-    const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+
+    // Expose global functions for C# to inject lines via ExecuteScriptAsync
+    useEffect(() => {
+        (window as any).__addConsoleLine = (line: ConsoleLine) => {
+            setLines((prev) => [...prev, line]);
+        };
+        (window as any).__setConsoleLines = (newLines: ConsoleLine[]) => {
+            setLines(newLines);
+        };
+        (window as any).__clearConsole = () => {
+            setLines([]);
+        };
+        // Signal to C# that we're ready to receive lines
+        (window as any).__consoleReady = true;
+        return () => {
+            delete (window as any).__addConsoleLine;
+            delete (window as any).__setConsoleLines;
+            delete (window as any).__clearConsole;
+            delete (window as any).__consoleReady;
+        };
+    }, []);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -70,11 +77,10 @@ export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollap
         }
     }, [lines]);
 
-    // Get unique client names for account filter
-    const clientNames = Array.from(new Set(lines.filter(l => l.client).map(l => l.client!)));
+    const clientNames = Array.from(new Set(lines.filter((l) => l.client).map((l) => l.client!)));
 
     const filtered = lines.filter((l) => {
-        if (filter === "log" && !l.client) return false; // Show only remote logs
+        if (filter === "log" && !l.client) return false;
         if (filter !== "all" && filter !== "log" && l.type !== filter) return false;
         if (clientFilter !== "all" && l.client !== clientFilter) return false;
         if (searchQuery && !l.message.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -86,48 +92,32 @@ export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollap
         warning: lines.filter((l) => l.type === "warning").length,
     };
 
-    const handleDragStart = (e: React.MouseEvent) => {
-        e.preventDefault();
-        if (collapsed) return;
-        dragRef.current = { startY: e.clientY, startH: height };
-        const onMove = (ev: MouseEvent) => {
-            if (!dragRef.current) return;
-            const dy = dragRef.current.startY - ev.clientY;
-            onHeightChange(Math.max(80, Math.min(600, dragRef.current.startH + dy)));
-        };
-        const onUp = () => {
-            dragRef.current = null;
-            window.removeEventListener("mousemove", onMove);
-            window.removeEventListener("mouseup", onUp);
-        };
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-    };
+    const handleClear = useCallback(() => {
+        setLines([]);
+        // Tell main window to clear too
+        try {
+            (window as any).chrome?.webview?.postMessage(JSON.stringify({ action: "consoleClear" }));
+        } catch {}
+    }, []);
+
+    const handleDockBack = useCallback(() => {
+        // Tell main window to re-dock
+        try {
+            (window as any).chrome?.webview?.postMessage(JSON.stringify({ type: "closeConsole" }));
+        } catch {}
+    }, []);
 
     return (
-        <div className={cn(
-            "flex flex-col border-t border-white/[0.06] transition-all duration-300 ease-in-out bg-[#0a0a0c]",
-            collapsed ? "h-[34px]" : ""
-        )} style={collapsed ? undefined : { height }}>
-            {/* Drag handle */}
-            <div
-                className="flex items-center justify-center h-[6px] cursor-ns-resize hover:bg-white/[0.04] transition-colors group"
-                onMouseDown={handleDragStart}
-                onDoubleClick={onToggleCollapse}
-            >
-                <div className="w-8 h-[3px] rounded-full bg-white/[0.08] group-hover:bg-white/[0.15] transition-colors" />
-            </div>
-
+        <div className="flex flex-col h-screen bg-[#0a0a0c] text-foreground select-none">
             {/* Header */}
-            <div className="flex items-center h-[28px] px-3 gap-2 shrink-0">
+            <div className="flex items-center h-[32px] px-3 gap-2 shrink-0 border-b border-white/[0.06] bg-[#0c0c0e]">
                 <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Terminals
+                    Terminal
                 </span>
-                <Badge variant="secondary" className="text-[9px] h-4 px-1.5 bg-white/5 text-muted-foreground border-0">
+                <span className="text-[9px] h-4 px-1.5 bg-white/5 text-muted-foreground rounded-sm flex items-center">
                     {filtered.length}
-                </Badge>
+                </span>
 
-                {/* Error/Warning counts */}
                 {counts.error > 0 && (
                     <button
                         onClick={() => setFilter(filter === "error" ? "all" : "error")}
@@ -155,7 +145,7 @@ export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollap
 
                 {/* Search input inline */}
                 {showSearch && (
-                    <div className="flex items-center gap-1.5 h-[22px] px-2 bg-white/[0.04] rounded-md border border-white/[0.06] animate-fade-slide-in">
+                    <div className="flex items-center gap-1.5 h-[22px] px-2 bg-white/[0.04] rounded-md border border-white/[0.06]">
                         <Search className="w-3 h-3 text-muted-foreground" />
                         <input
                             autoFocus
@@ -193,28 +183,22 @@ export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollap
                     >
                         <Filter className="w-3 h-3" />
                     </button>
-                    <button onClick={onClear} className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors">
+                    <button onClick={handleClear} className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors">
                         <Trash2 className="w-3 h-3" />
                     </button>
                     <button
-                        onClick={onPopOut}
+                        onClick={handleDockBack}
                         className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                        title="Pop out terminal"
+                        title="Dock back to main window"
                     >
-                        <ExternalLink className="w-3 h-3" />
-                    </button>
-                    <button onClick={onToggleCollapse} className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors">
-                        {collapsed ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    </button>
-                    <button onClick={onToggleCollapse} className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-white/5 transition-colors">
-                        <X className="w-3 h-3" />
+                        <ArrowLeftToLine className="w-3 h-3" />
                     </button>
                 </div>
             </div>
 
             {/* Filter bar */}
-            {showFilter && !collapsed && (
-                <div className="flex items-center h-[24px] px-3 gap-1 border-t border-white/[0.04] shrink-0 animate-fade-slide-in">
+            {showFilter && (
+                <div className="flex items-center h-[24px] px-3 gap-1 border-b border-white/[0.04] shrink-0">
                     {(["all", "log", "info", "success", "warning", "error"] as FilterType[]).map((f) => (
                         <button
                             key={f}
@@ -236,7 +220,7 @@ export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollap
                                 className="h-[18px] px-1 rounded text-[9px] font-medium bg-white/5 text-muted-foreground border-0 outline-none cursor-pointer hover:bg-white/10 transition-colors"
                             >
                                 <option value="all">All Accounts</option>
-                                {clientNames.map(name => (
+                                {clientNames.map((name) => (
                                     <option key={name} value={name}>{name}</option>
                                 ))}
                             </select>
@@ -246,43 +230,41 @@ export default function ConsolePanel({ lines, onClear, collapsed, onToggleCollap
             )}
 
             {/* Output */}
-            {!collapsed && (
-                <div ref={scrollRef} className="flex-1 overflow-y-auto">
-                    <div className="p-3 space-y-0.5 font-mono text-xs leading-5">
-                        {filtered.length === 0 && (
-                            <p className="text-center text-muted-foreground/40 py-8">
-                                {lines.length === 0 ? (
-                                    <>
-                                        No terminals available
-                                        <br />
-                                        <span className="text-[10px]">Terminals are created automatically when instances connect</span>
-                                    </>
-                                ) : (
-                                    "No matching results"
-                                )}
-                            </p>
-                        )}
-                        {filtered.map((line) => (
-                            <div key={line.id} className="flex gap-2 items-start animate-fade-slide-in hover:bg-white/[0.02] px-1 rounded transition-colors">
-                                <span className="text-muted-foreground/30 shrink-0 pt-0.5">
-                                    {typeIcons[line.type]}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                <div className="p-3 space-y-0.5 font-mono text-xs leading-5">
+                    {filtered.length === 0 && (
+                        <p className="text-center text-muted-foreground/40 py-8">
+                            {lines.length === 0 ? (
+                                <>
+                                    No terminals available
+                                    <br />
+                                    <span className="text-[10px]">Waiting for console output...</span>
+                                </>
+                            ) : (
+                                "No matching results"
+                            )}
+                        </p>
+                    )}
+                    {filtered.map((line, idx) => (
+                        <div key={idx} className="flex gap-2 items-start hover:bg-white/[0.02] px-1 rounded transition-colors">
+                            <span className="text-muted-foreground/30 shrink-0 pt-0.5">
+                                {typeIcons[line.type]}
+                            </span>
+                            <span className="text-muted-foreground/40 shrink-0">
+                                {line.timestamp}
+                            </span>
+                            {line.client && (
+                                <span className="text-[9px] bg-white/5 text-muted-foreground px-1 rounded shrink-0">
+                                    {line.client}
                                 </span>
-                                <span className="text-muted-foreground/40 shrink-0">
-                                    {line.timestamp}
-                                </span>
-                                {line.client && (
-                                    <span className="text-[9px] bg-white/5 text-muted-foreground px-1 rounded shrink-0">
-                                        {line.client}
-                                    </span>
-                                )}
-                                <span className={cn(typeColors[line.type] || typeColors[""], "break-all")}>
-                                    {line.message}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
+                            )}
+                            <span className={cn(typeColors[line.type] || typeColors[""], "break-all")}>
+                                {line.message}
+                            </span>
+                        </div>
+                    ))}
                 </div>
-            )}
+            </div>
         </div>
     );
 }

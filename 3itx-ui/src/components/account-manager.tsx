@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Users, Monitor, Gamepad2, RefreshCw, X, Check, Eye, Pencil } from "lucide-react";
+import { Users, Monitor, Gamepad2, RefreshCw, X, Check, Eye, Pencil, FolderTree } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import * as fsBridge from "@/lib/fs-bridge";
@@ -144,10 +144,7 @@ export default function AccountManagerPanel({
                             ? "border-emerald-500/20 bg-emerald-500/[0.05]"
                             : "border-white/[0.06] bg-white/[0.02]"
                     )}>
-                        <div className={cn(
-                            "w-2 h-2 rounded-full shrink-0",
-                            clients.length > 0 ? "bg-emerald-400" : "bg-muted-foreground/30"
-                        )} />
+
                         <span className="text-[10px] text-muted-foreground">
                             {clients.length > 0
                                 ? `Connected — ${clients.length} account${clients.length !== 1 ? "s" : ""}`
@@ -211,14 +208,6 @@ export default function AccountManagerPanel({
                                         {/* Info */}
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
-                                                {/* Status dot */}
-                                                <div className={cn(
-                                                    "w-1.5 h-1.5 rounded-full shrink-0",
-                                                    client.status === "connected" ? "bg-emerald-400" :
-                                                        client.status === "menu" ? "bg-blue-400" :
-                                                            client.status === "injecting" ? "bg-amber-400 animate-pulse" :
-                                                                "bg-red-400"
-                                                )} />
                                                 <span className="text-[11px] font-medium text-foreground truncate">
                                                     {client.displayName}
                                                 </span>
@@ -230,7 +219,7 @@ export default function AccountManagerPanel({
                                                 <div className="flex items-center gap-1">
                                                     <Gamepad2 className="w-2.5 h-2.5 text-muted-foreground/40" />
                                                     <span className="text-[9px] text-muted-foreground/50 truncate max-w-[100px]">
-                                                        {client.placeName || `Place ${client.placeId}`}
+                                                        {client.placeId === 0 ? "Roblox Menu" : (client.placeName || `Place ${client.placeId}`)}
                                                     </span>
                                                 </div>
                                                 {/* Status label */}
@@ -249,14 +238,38 @@ export default function AccountManagerPanel({
                                             </div>
                                         </div>
 
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (client.status !== "connected") return;
+                                                fsBridge.openDexExplorer(client.pid, client.displayName || client.username);
+                                            }}
+                                            disabled={client.status !== "connected"}
+                                            className={cn(
+                                                "shrink-0 w-5 h-5 flex items-center justify-center rounded transition-all",
+                                                client.status === "connected"
+                                                    ? "opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-amber-400 hover:bg-amber-400/10"
+                                                    : "opacity-0 group-hover:opacity-40 text-muted-foreground/20 cursor-not-allowed"
+                                            )}
+                                            title={client.status === "connected" ? "Open Explorer" : "Not available (client in menu)"}
+                                        >
+                                            <FolderTree className="w-3 h-3" />
+                                        </button>
                                         {/* Monitor button */}
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                if (client.status !== "connected") return;
                                                 handleMonitor(client.pid, client.displayName || client.username);
                                             }}
-                                            className="shrink-0 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-blue-400 hover:bg-blue-400/10 transition-all"
-                                            title="Open monitor"
+                                            disabled={client.status !== "connected"}
+                                            className={cn(
+                                                "shrink-0 w-5 h-5 flex items-center justify-center rounded transition-all",
+                                                client.status === "connected"
+                                                    ? "opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-blue-400 hover:bg-blue-400/10"
+                                                    : "opacity-0 group-hover:opacity-40 text-muted-foreground/20 cursor-not-allowed"
+                                            )}
+                                            title={client.status === "connected" ? "Open monitor" : "Not available (client in menu)"}
                                         >
                                             <Eye className="w-3 h-3" />
                                         </button>

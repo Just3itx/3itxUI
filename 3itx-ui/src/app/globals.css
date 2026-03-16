@@ -433,3 +433,8 @@
 .monaco-editor .find-widget .matchesCount {
   color: rgba(255, 255, 255, 0.5) !important;
 }
+
+/* Hide "No suggestions" popup — Monaco adds .message class to .suggest-widget when empty */
+.monaco-editor .suggest-widget.message {
+  display: none !important;
+}

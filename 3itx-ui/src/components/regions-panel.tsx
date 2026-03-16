@@ -124,7 +124,10 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
     const [selectedRegion, setSelectedRegion] = useState<{ code: string; city: string; countryName: string; rovalraRegion: string } | null>(null);
     const [servers, setServers] = useState<RovalraServer[]>([]);
     const [loadingServers, setLoadingServers] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [teleporting, setTeleporting] = useState<string | null>(null);
+    const sentinelRef = useRef<HTMLDivElement>(null);
 
     const globeContainerRef = useRef<HTMLDivElement>(null);
     const scriptLoadedRef = useRef(false);
@@ -371,6 +374,7 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
         if (!currentPlaceId.trim()) return;
         setLoadingServers(true);
         setServers([]);
+        setNextCursor(null);
 
         try {
             const res = await fetch(`/api/servers?placeId=${currentPlaceId}&region=${encodeURIComponent(region.rovalraRegion)}`);
@@ -378,6 +382,7 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
 
             if (data.status === "success" && Array.isArray(data.servers)) {
                 setServers(data.servers);
+                setNextCursor(data.next_cursor || null);
             } else {
                 setServers([]);
             }
@@ -388,6 +393,42 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
             setLoadingServers(false);
         }
     }, []);
+
+    // ─── Load more servers (next page) ───
+    const loadMoreServers = useCallback(async () => {
+        if (!nextCursor || loadingMore || !selectedRegion) return;
+        const currentPlaceId = placeIdRef.current;
+        if (!currentPlaceId.trim()) return;
+        setLoadingMore(true);
+
+        try {
+            const res = await fetch(`/api/servers?placeId=${currentPlaceId}&region=${encodeURIComponent(selectedRegion.rovalraRegion)}&cursor=${encodeURIComponent(nextCursor)}`);
+            const data = await res.json();
+
+            if (data.status === "success" && Array.isArray(data.servers)) {
+                setServers(prev => [...prev, ...data.servers]);
+                setNextCursor(data.next_cursor || null);
+            }
+        } catch (err) {
+            console.error("[Regions] Failed to load more servers:", err);
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [nextCursor, loadingMore, selectedRegion]);
+
+    // Intersection observer for infinite scroll
+    useEffect(() => {
+        const el = sentinelRef.current;
+        if (!el) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting) loadMoreServers();
+            },
+            { threshold: 0.1 }
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [loadMoreServers, nextCursor]);
 
     // Keep fetchServersRef in sync
     useEffect(() => { fetchServersRef.current = fetchServers; }, [fetchServers]);
@@ -659,6 +700,19 @@ export default function RegionsPanel({ clients, selectedPids }: RegionsPanelProp
                                             </div>
                                         </div>
                                     ))
+                                )}
+                                {/* Scroll sentinel for infinite scroll */}
+                                {nextCursor && (
+                                    <div
+                                        ref={sentinelRef}
+                                        className="flex items-center justify-center py-3"
+                                    >
+                                        {loadingMore ? (
+                                            <Loader2 className="w-3.5 h-3.5 text-muted-foreground/40 animate-spin" />
+                                        ) : (
+                                            <span className="text-[8px] text-muted-foreground/30">Scroll for more</span>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </ScrollArea>

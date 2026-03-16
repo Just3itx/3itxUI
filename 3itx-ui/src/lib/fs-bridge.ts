@@ -236,9 +236,9 @@ export async function getClients(): Promise<any[]> {
 }
 
 /** Execute a script on specific PIDs */
-export async function executeOnClients(pids: number[], script: string): Promise<boolean> {
+export async function executeOnClients(pids: number[], script: string, method?: "piper" | "scheduler"): Promise<boolean> {
     if (isWebView2()) {
-        const data = await send({ action: "executeOnClients", pids, script });
+        const data = await send({ action: "executeOnClients", pids, script, method: method ?? "scheduler" });
         return !!data?.ok;
     }
     return false;
@@ -349,4 +349,150 @@ export async function captureWindow(pid: number): Promise<string | null> {
         return data?.image ?? null;
     }
     return null;
+}
+
+/** Queue a command for Synapse Z (e.g. "reload_settings") */
+export async function queueCommand(command: string, pid?: number): Promise<boolean> {
+    if (isWebView2()) {
+        const data = await send({ action: "queueCommand", command, pid: pid ?? 0 });
+        return data?.ok === true;
+    }
+    return false;
+}
+
+/** Get Synapse Z account info (expiry, version, status) */
+export async function getAccountInfo(): Promise<{ hasAccount: boolean; expiry: string; version: string; binExists: boolean; accountKey: string; error: string } | null> {
+    if (isWebView2()) {
+        return await send({ action: "getAccountInfo" });
+    }
+    return null;
+}
+
+/** Redeem a license key */
+export async function redeemKey(license: string): Promise<{ code: number; error: string } | null> {
+    if (isWebView2()) {
+        return await send({ action: "redeemKey", license });
+    }
+    return null;
+}
+
+/** Reset HWID */
+export async function resetHwid(): Promise<{ code: number; error: string } | null> {
+    if (isWebView2()) {
+        return await send({ action: "resetHwid" });
+    }
+    return null;
+}
+
+/** Open a URL in the default system browser */
+export async function openUrl(url: string): Promise<void> {
+    if (isWebView2()) {
+        // Send via bridge — C# handler opens in default browser via cmd /c start
+        await send({ action: "openUrl", url });
+        return;
+    }
+    // Dev mode fallback
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+/** Create a new Synapse Z account */
+export async function createAccount(license: string): Promise<{ ok: boolean; error: string } | null> {
+    if (isWebView2()) {
+        return await send({ action: "createAccount", license });
+    }
+    return null;
+}
+
+/* ─── DEX Explorer Bridge ─── */
+
+/** Open a DEX Explorer window for a specific client */
+export async function openDexExplorer(pid: number, username: string): Promise<void> {
+    if (isWebView2()) {
+        await send({ action: "openDexExplorer", pid, username });
+    }
+}
+
+/** Ensure DEX icons are downloaded (Icons.zip → DexIcons/) */
+export async function ensureDexIcons(): Promise<{ ok: boolean; alreadyExists?: boolean; error?: string } | null> {
+    if (isWebView2()) {
+        return await send({ action: "ensureDexIcons" });
+    }
+    return null;
+}
+
+/** Get DEX class icons as className → data:image/png;base64,... map */
+export async function getDexIcons(): Promise<{ ok: boolean; icons?: Record<string, string>; error?: string } | null> {
+    if (isWebView2()) {
+        return await send({ action: "getDexIcons" });
+    }
+    return null;
+}
+
+/** Send a DEX query to a specific Roblox client via WS */
+export async function dexRequest(pid: number, type: string, data: Record<string, unknown> = {}): Promise<boolean> {
+    if (!isWebView2()) return false;
+    const message = { type, ...data };
+    const result = await send({ action: "sendDexMessage", pid, message });
+    return !!result?.ok;
+}
+
+// DEX data callback registry
+type DexCallback = (pid: number, data: unknown) => void;
+const _dexCallbacks: DexCallback[] = [];
+
+export function onDexData(cb: DexCallback): void {
+    _dexCallbacks.push(cb);
+}
+
+export function offDexData(cb: DexCallback): void {
+    const idx = _dexCallbacks.indexOf(cb);
+    if (idx >= 0) _dexCallbacks.splice(idx, 1);
+}
+
+// Register the global handler
+if (typeof window !== "undefined") {
+    (window as any).__dexDiag = { calls: 0, cbCount: 0, lastType: "", lastPid: 0, errors: 0 };
+    (window as any).__onDexData = (pid: number, rawJson: string) => {
+        const diag = (window as any).__dexDiag;
+        diag.calls++;
+        diag.cbCount = _dexCallbacks.length;
+        diag.lastPid = pid;
+        try {
+            const data = typeof rawJson === "string" ? JSON.parse(rawJson) : rawJson;
+            diag.lastType = data?.type || "unknown";
+            for (const cb of _dexCallbacks) {
+                cb(pid, data);
+            }
+        } catch (e: any) {
+            diag.errors++;
+            diag.lastError = e?.message;
+        }
+    };
+}
+
+/** Show a native WPF context menu for the DEX explorer (delegates to C#) */
+export async function showDexContextMenu(x: number, y: number, path: string, name: string, isRoot: boolean, hasCopied: boolean = false, isSearchResult: boolean = false, treePath?: string, className?: string): Promise<void> {
+    if (isWebView2()) {
+        await send({ action: "showDexContextMenu", x, y, path, name, isRoot, hasCopied, isSearchResult, treePath: treePath || path, className: className || "" });
+    }
+}
+
+/** Notify C# that a DEX node was double-clicked (for script decompilation) */
+export async function dexDoubleClick(treePath: string, name: string, className: string): Promise<void> {
+    if (isWebView2()) {
+        await send({ action: "dexDoubleClick", treePath, name, className });
+    }
+}
+
+/** Close any open DEX context menu */
+export async function closeDexContextMenu(): Promise<void> {
+    if (isWebView2()) {
+        await send({ action: "closeDexContextMenu" });
+    }
 }

@@ -3,6 +3,7 @@
 import {
     Code,
     Globe,
+    KeyRound,
     LayoutGrid,
     Settings,
     Users,
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type PanelName = "editor" | "scripthub" | "settings" | "accounts" | "regions";
+export type PanelName = "editor" | "scripthub" | "settings" | "accounts" | "regions" | "synaccount";
 
 interface SidebarProps {
     active: PanelName;
@@ -26,6 +27,7 @@ const TOP_ITEMS: { panel: PanelName; icon: React.ElementType; label: string }[] 
     { panel: "scripthub", icon: LayoutGrid, label: "Script Hub" },
     { panel: "accounts", icon: Users, label: "Account Manager" },
     { panel: "regions", icon: Globe, label: "Regions" },
+    { panel: "synaccount", icon: KeyRound, label: "Synapse Z Account" },
 ];
 
 const BOTTOM_ITEMS: { panel: PanelName; icon: React.ElementType; label: string }[] = [

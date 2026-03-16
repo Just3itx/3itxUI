@@ -56,6 +56,88 @@ public class SynapseZAPI
     }
 
     /// <summary>
+    /// Send a command to a Synapse Z instance via named pipes.
+    /// Connects to \\.\pipe\synz-{PID}, initializes a session, and sends the command.
+    /// Returns: 0=success, 1=pipe not found, 2=session error, 3=send error
+    /// </summary>
+    public static int SendPipeCommand(string command, int PID)
+    {
+        string initialPipe = $"\\\\.\\pipe\\synz-{PID}";
+
+        try
+        {
+            // Connect to the initial pipe to get a session pipe name
+            using var client = new System.IO.Pipes.NamedPipeClientStream(".", $"synz-{PID}", System.IO.Pipes.PipeDirection.InOut);
+            client.Connect(500); // 500ms timeout
+            client.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
+
+            // Send "new" to create a session
+            var newCmd = Encoding.UTF8.GetBytes("new");
+            client.Write(newCmd, 0, newCmd.Length);
+            client.Flush();
+
+            // Read session pipe name
+            var buf = new byte[4096];
+            int read = client.Read(buf, 0, buf.Length);
+            if (read == 0)
+            {
+                LatestErrorMsg = "Empty session pipe response";
+                return 2;
+            }
+            string sessionPipeName = Encoding.UTF8.GetString(buf, 0, read);
+
+            // Extract just the pipe name (remove \\.\pipe\ prefix if present)
+            string sessionName = sessionPipeName;
+            if (sessionName.StartsWith("\\\\.\\pipe\\"))
+                sessionName = sessionName.Substring(9);
+
+            // Connect to the session pipe
+            using var session = new System.IO.Pipes.NamedPipeClientStream(".", sessionName, System.IO.Pipes.PipeDirection.InOut);
+            session.Connect(500);
+            session.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
+
+            // Protocol: write number of commands, then each command
+            // We send 1 command (the actual command) + the implicit "read"
+            var cmdList = new[] { command, "read" };
+            var countBytes = Encoding.UTF8.GetBytes(cmdList.Length.ToString());
+            session.Write(countBytes, 0, countBytes.Length);
+            session.Flush();
+
+            foreach (var cmd in cmdList)
+            {
+                // Write command
+                var cmdBytes = Encoding.UTF8.GetBytes(cmd);
+                session.Write(cmdBytes, 0, cmdBytes.Length);
+                session.Flush();
+
+                // Read number of responses
+                read = session.Read(buf, 0, buf.Length);
+                if (read == 0) continue;
+                string respCountStr = Encoding.UTF8.GetString(buf, 0, read);
+                if (!int.TryParse(respCountStr, out int numResponses)) continue;
+
+                // Read and discard responses
+                for (int i = 0; i < numResponses; i++)
+                {
+                    _ = session.Read(buf, 0, buf.Length);
+                }
+            }
+
+            return 0;
+        }
+        catch (TimeoutException)
+        {
+            LatestErrorMsg = $"Pipe synz-{PID} not found (timeout)";
+            return 1;
+        }
+        catch (Exception e)
+        {
+            LatestErrorMsg = e.Message;
+            return 3;
+        }
+    }
+
+    /// <summary>
     /// Get the expiry date of the SynapseZ license.
     /// Returns null on error (check GetLatestErrorMessage).
     /// </summary>

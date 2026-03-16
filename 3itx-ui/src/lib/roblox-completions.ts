@@ -1157,6 +1157,221 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
         "doc": "Generates a random encryption key"
     },
     {
+        "label": "crypt.base64_encode",
+        "detail": "(data: string) → string",
+        "doc": "Alias for base64encode; Base64 encodes data"
+    },
+    {
+        "label": "crypt.base64_decode",
+        "detail": "(data: string) → string",
+        "doc": "Alias for base64decode; Base64 decodes data"
+    },
+    {
+        "label": "crypt.base64",
+        "detail": "(data: string) → string",
+        "doc": "Base64 encodes data"
+    },
+    {
+        "label": "crypt.base64encode",
+        "detail": "(data: string) → string",
+        "doc": "Base64 encodes data"
+    },
+    {
+        "label": "crypt.base64decode",
+        "detail": "(data: string) → string",
+        "doc": "Base64 decodes data"
+    },
+    {
+        "label": "crypt.generate_key",
+        "detail": "() → string",
+        "doc": "Generates a random encryption key"
+    },
+    {
+        "label": "crypt.generatekey",
+        "detail": "() → string",
+        "doc": "Generates a random encryption key"
+    },
+    {
+        "label": "crypt.generate_bytes",
+        "detail": "(length: number) → string",
+        "doc": "Generates random bytes"
+    },
+    {
+        "label": "crypt.generatebytes",
+        "detail": "(length: number) → string",
+        "doc": "Generates random bytes"
+    },
+    {
+        "label": "crypt.random",
+        "detail": "(length: number) → string",
+        "doc": "Generates random bytes"
+    },
+    {
+        "label": "crypt.derive_key",
+        "detail": "(password: string, salt: string, iterations?: number) → string",
+        "doc": "Derives a key from a password"
+    },
+    {
+        "label": "crypt.derivekey",
+        "detail": "(password: string, salt: string, iterations?: number) → string",
+        "doc": "Derives a key from a password"
+    },
+    {
+        "label": "crypt.derive_password",
+        "detail": "(password: string, salt: string, iterations?: number) → string",
+        "doc": "Derives a password-based key"
+    },
+    {
+        "label": "crypt.derivepassword",
+        "detail": "(password: string, salt: string, iterations?: number) → string",
+        "doc": "Derives a password-based key"
+    },
+    {
+        "label": "crypt.hexencode",
+        "detail": "(data: string) → string",
+        "doc": "Encodes data to hex"
+    },
+    {
+        "label": "crypt.hex_encode",
+        "detail": "(data: string) → string",
+        "doc": "Encodes data to hex"
+    },
+    {
+        "label": "crypt.hexdecode",
+        "detail": "(data: string) → string",
+        "doc": "Decodes hex data"
+    },
+    {
+        "label": "crypt.hex_decode",
+        "detail": "(data: string) → string",
+        "doc": "Decodes hex data"
+    },
+    {
+        "label": "crypt.hex",
+        "detail": "(data: string) → string",
+        "doc": "Encodes data to hex"
+    },
+    {
+        "label": "crypt.lz4compress",
+        "detail": "(data: string) → string",
+        "doc": "Compresses data using LZ4"
+    },
+    {
+        "label": "crypt.lz4_compress",
+        "detail": "(data: string) → string",
+        "doc": "Compresses data using LZ4"
+    },
+    {
+        "label": "crypt.lz4decompress",
+        "detail": "(data: string) → string",
+        "doc": "Decompresses LZ4 data"
+    },
+    {
+        "label": "crypt.lz4_decompress",
+        "detail": "(data: string) → string",
+        "doc": "Decompresses LZ4 data"
+    },
+    {
+        "label": "crypt.lz4",
+        "detail": "(data: string) → string",
+        "doc": "Compresses data using LZ4"
+    },
+    {
+        "label": "crypt.sign",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Creates a digital signature"
+    },
+    {
+        "label": "crypt.signcreate",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Creates a digital signature"
+    },
+    {
+        "label": "crypt.sign_create",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Creates a digital signature"
+    },
+    {
+        "label": "crypt.signopen",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Verifies and opens a signed message"
+    },
+    {
+        "label": "crypt.sign_open",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Verifies and opens a signed message"
+    },
+    {
+        "label": "crypt.signkeygen",
+        "detail": "() → table",
+        "doc": "Generates a signing keypair"
+    },
+    {
+        "label": "crypt.sign_keygen",
+        "detail": "() → table",
+        "doc": "Generates a signing keypair"
+    },
+    {
+        "label": "crypt.seal",
+        "detail": "(data: string, publicKey: string) → string",
+        "doc": "Encrypts data using sealed box encryption"
+    },
+    {
+        "label": "crypt.sealencrypt",
+        "detail": "(data: string, publicKey: string) → string",
+        "doc": "Encrypts data using sealed box encryption"
+    },
+    {
+        "label": "crypt.seal_encrypt",
+        "detail": "(data: string, publicKey: string) → string",
+        "doc": "Encrypts data using sealed box encryption"
+    },
+    {
+        "label": "crypt.sealdecrypt",
+        "detail": "(data: string, privateKey: string) → string",
+        "doc": "Decrypts sealed box data"
+    },
+    {
+        "label": "crypt.seal_decrypt",
+        "detail": "(data: string, privateKey: string) → string",
+        "doc": "Decrypts sealed box data"
+    },
+    {
+        "label": "crypt.sealkeygen",
+        "detail": "() → table",
+        "doc": "Generates a sealed box keypair"
+    },
+    {
+        "label": "crypt.seal_keygen",
+        "detail": "() → table",
+        "doc": "Generates a sealed box keypair"
+    },
+    {
+        "label": "crypt.user_encrypt",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Encrypts user data"
+    },
+    {
+        "label": "crypt.userencrypt",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Encrypts user data"
+    },
+    {
+        "label": "crypt.user_decrypt",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Decrypts user data"
+    },
+    {
+        "label": "crypt.userdecrypt",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Decrypts user data"
+    },
+    {
+        "label": "crypt.user",
+        "detail": "(data: string, key: string) → string",
+        "doc": "Performs user-based encryption or decryption"
+    },
+    {
         "label": "setclipboard",
         "detail": "(text: string) → nil",
         "doc": "Sets system clipboard content"
@@ -1484,6 +1699,8 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
     { "label": "hooksignal", "detail": "(signal: ScriptSignal, callback: function) → nil", "doc": "Hooks a signal to intercept invocations" },
     { "label": "restoresignal", "detail": "(signal: ScriptSignal) → nil", "doc": "Unhooks a hooked signal" },
     { "label": "issignalhooked", "detail": "(signal: ScriptSignal) → boolean", "doc": "Returns whether a signal is hooked" },
+    { "label": "run_on_actor", "detail": "(actor: Instance, source: string, ...any) → boolean", "doc": "Runs Luau source code on the specified Actor with optional arguments" },
+    { "label": "runonactor", "detail": "(actor: Instance, source: string, ...any) → boolean", "doc": "Runs Luau source code on the specified Actor with optional arguments" },
     // Filter
     { "label": "getfilter", "detail": "() → Filter", "doc": "Returns a new Filter object for use with hookfunction" },
     // Filesystem (async variants)
@@ -1494,6 +1711,9 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
     { "label": "getsynasset", "detail": "(path: string) → string", "doc": "Returns a Content string for workspace assets" },
     { "label": "saveplace", "detail": "(options?: table) → boolean [yields]", "doc": "Saves the game, equivalent to saveinstance(game)" },
     // Reflection
+    { "label": "queue_on_teleport", "detail": "(script: string) → nil", "doc": "Queues script to execute after teleport" },
+    { "label": "clear_teleport_queue", "detail": "() → nil", "doc": "Clears the teleport queue" },
+    { "label": "get_thread_identity", "detail": "() → number", "doc": "Returns current thread context level" },
     { "label": "setscriptable", "detail": "(instance: Instance, property: string, scriptable: boolean) → boolean", "doc": "Sets a property's scriptable flag, returns original" },
     { "label": "getproperties", "detail": "(instance: Instance) → table", "doc": "Returns all property values including non-scriptable" },
     { "label": "gethiddenproperties", "detail": "(instance: Instance) → table", "doc": "Returns all non-scriptable property values" },
@@ -1545,20 +1765,15 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
     { "label": "getmousestate", "detail": "() → table", "doc": "Returns the current mouse state" },
     { "label": "setmousestate", "detail": "(state: table) → nil", "doc": "Sets the mouse state" },
     // syn.* namespace
-    { "label": "syn.queue_on_teleport", "detail": "(script: string) → nil", "doc": "Queues script to execute after teleport" },
-    { "label": "syn.clear_teleport_queue", "detail": "() → nil", "doc": "Clears the teleport queue" },
-    { "label": "syn.get_thread_identity", "detail": "() → number", "doc": "Returns current thread context level" },
     { "label": "syn.set_thread_identity", "detail": "(identity: number) → nil", "doc": "Sets current thread context level" },
     { "label": "syn.protect_gui", "detail": "(target: Instance) → nil", "doc": "Protects a GUI (deprecated, use gethui)" },
     { "label": "syn.unprotect_gui", "detail": "(target: Instance) → nil", "doc": "Unprotects a GUI (deprecated)" },
     { "label": "syn.trampoline_call", "detail": "(target: function, callStack: table, threadOptions: table, ...args) → boolean, ...any", "doc": "Proxies a call with custom call stack and thread options" },
     { "label": "syn.toast_notification", "detail": "(options: table) → nil", "doc": "Displays a toast notification in the UI" },
-    { "label": "syn.ipc_send", "detail": "(data: any) → nil", "doc": "Sends data to the UI" },
-    { "label": "syn.oth.hook", "detail": "(target: function, hook: function) → function", "doc": "Secure hookfunction for C functions using separate threads" },
-    { "label": "syn.oth.unhook", "detail": "(target: function, hookOrCallback?: function) → boolean", "doc": "Unhooks a syn.oth.hook" },
-    { "label": "syn.oth.get_root_callback", "detail": "() → function", "doc": "Gets the root callback in OTH context" },
-    { "label": "syn.oth.is_hook_thread", "detail": "() → boolean", "doc": "Returns whether current thread is a hook thread" },
-    { "label": "syn.oth.get_original_thread", "detail": "() → thread", "doc": "Gets the original thread in OTH context" },
+    { "label": "syn.toastnotification", "detail": "(options: table) → nil", "doc": "Displays a toast notification in the UI" },
+    { "label": "syn.killprocess", "detail": "() → nil", "doc": "Immediately terminates the current Roblox process" },
+    { "label": "syn.kill_process", "detail": "() → nil", "doc": "Alias for syn.killprocess; kills the current Roblox instance" },
+    { "label": "syn.get_auroraservice", "detail": "() → nil", "doc": "Unsure does nothing idk" },
     // Network
     { "label": "getfpscap", "detail": "() → number", "doc": "Returns current FPS cap" },
     // RakNet
@@ -1568,7 +1783,70 @@ export const LUAU_STDLIB: GlobalCompletion[] = [
     { "label": "raknet.send", "detail": "(data: buffer | string | {number}, priority?: number, reliability?: number, orderingChannel?: number) → nil", "doc": "Sends data via RakNet" },
     { "label": "raknet.add_receive_hook", "detail": "(hook: (message: RakNetMessage) → ()) → function", "doc": "Hooks incoming RakNet messages, returns the hook" },
     { "label": "raknet.remove_receive_hook", "detail": "(hook: function) → nil", "doc": "Removes a receive hook" },
-    { "label": "raknet.receive", "detail": "(data: buffer | string | {number}) → nil", "doc": "Simulates receiving data via RakNet" }
+    { "label": "raknet.receive", "detail": "(data: buffer | string | {number}) → nil", "doc": "Simulates receiving data via RakNet" },
+    // OTH Lib
+    { "label": "oth.hook", "detail": "(target: function, hook: function) → function", "doc": "Secure hookfunction for C functions using separate threads" },
+    { "label": "oth.unhook", "detail": "(target: function, hookOrCallback?: function) → boolean", "doc": "Unhooks a oth.hook" },
+    { "label": "oth.un_hook", "detail": "(target: function, hookOrCallback?: function) → boolean", "doc": "Unhooks a oth.hook" },
+    { "label": "oth.get_root_callback", "detail": "() → function", "doc": "Gets the root callback in OTH context" },
+    { "label": "oth.getrootcallback", "detail": "() → function", "doc": "Gets the root callback in OTH context" },
+    { "label": "oth.is_hook_thread", "detail": "() → boolean", "doc": "Returns whether current thread is a hook thread" },
+    { "label": "oth.ishookthread", "detail": "() → boolean", "doc": "Returns whether current thread is a hook thread" },
+    { "label": "oth.get_original_thread", "detail": "() → thread", "doc": "Gets the original thread in OTH context" },
+    { "label": "oth.getoriginalthread", "detail": "() → thread", "doc": "Gets the original thread in OTH context" },
+    { "label": "oth.ishooked", "detail": "(target: function) → boolean", "doc": "Checks whether a function is currently hooked through oth.hook" },
+    { "label": "oth.is_hooked", "detail": "(target: function) → boolean", "doc": "Checks whether a function is currently hooked through oth.hook" },
+    // ImGui Lib
+    { "label": "ImGui.Text", "detail": "(text: string) → nil", "doc": "Displays simple text" },
+    { "label": "ImGui.TextWrapped", "detail": "(text: string) → nil", "doc": "Displays text with word wrapping" },
+    { "label": "ImGui.TextColored", "detail": "(color: table, text: string) → nil", "doc": "Displays colored text" },
+    { "label": "ImGui.TextDisabled", "detail": "(text: string) → nil", "doc": "Displays disabled-looking text" },
+    { "label": "ImGui.Button", "detail": "(label: string, size?: table) → boolean", "doc": "Creates a button" },
+    { "label": "ImGui.ButtonEx", "detail": "(label: string, size?: table, flags?: number) → boolean", "doc": "Extended button with flags" },
+    { "label": "ImGui.SmallButton", "detail": "(label: string) → boolean", "doc": "Creates a small button" },
+    { "label": "ImGui.ArrowButton", "detail": "(id: string, dir: number) → boolean", "doc": "Creates an arrow-shaped button" },
+    { "label": "ImGui.ArrowButtonEx", "detail": "(id: string, dir: number, size?: table, flags?: number) → boolean", "doc": "Extended arrow button" },
+    { "label": "ImGui.Image", "detail": "(image: any, size: table, uv0?: table, uv1?: table, tintCol?: table, borderCol?: table) → nil", "doc": "Displays an image" },
+    { "label": "ImGui.ImageButton", "detail": "(image: any, size: table, uv0?: table, uv1?: table, framePadding?: number, bgCol?: table, tintCol?: table) → boolean", "doc": "Creates a clickable image button" },
+    { "label": "ImGui.LoadImage", "detail": "(path: string) → any", "doc": "Loads an image from path" },
+    { "label": "ImGui.Checkbox", "detail": "(label: string, value: boolean) → boolean", "doc": "Creates a checkbox" },
+    { "label": "ImGui.RadioButton", "detail": "(label: string, active: boolean) → boolean", "doc": "Creates a radio button" },
+    { "label": "ImGui.SliderFloat", "detail": "(label: string, value: number, min: number, max: number, format?: string) → number", "doc": "Creates a float slider" },
+    { "label": "ImGui.SliderInt", "detail": "(label: string, value: number, min: number, max: number, format?: string) → number", "doc": "Creates an int slider" },
+    { "label": "ImGui.SliderAngle", "detail": "(label: string, value: number) → number", "doc": "Creates an angle slider" },
+    { "label": "ImGui.ColorButton", "detail": "(col: table, flags?: number, size?: table) → boolean", "doc": "Creates a color button" },
+    { "label": "ImGui.ColorPicker3", "detail": "(label: string, col: table, flags?: number) → table", "doc": "3-component color picker" },
+    { "label": "ImGui.PushStyleColor", "detail": "(idx: number, col: table) → nil", "doc": "Pushes a style color" },
+    { "label": "ImGui.PopStyleColor", "detail": "(count?: number) → nil", "doc": "Pops style color(s)" },
+    { "label": "ImGui.PushItemWidth", "detail": "(width: number) → nil", "doc": "Sets the width of next item" },
+    { "label": "ImGui.PopItemWidth", "detail": "() → nil", "doc": "Restores item width" },
+    { "label": "ImGui.SetNextWindowSize", "detail": "(size: table, cond?: number) → nil", "doc": "Sets next window size" },
+    { "label": "ImGui.SetNextWindowPos", "detail": "(pos: table, cond?: number) → nil", "doc": "Sets next window position" },
+    { "label": "ImGui.SetNextWindowSizeConstraints", "detail": "(minSize: table, maxSize: table) → nil", "doc": "Constrains next window size" },
+    { "label": "ImGui.Begin", "detail": "(name: string, open?: boolean, flags?: number) → boolean", "doc": "Begins a window" },
+    { "label": "ImGui.End", "detail": "() → nil", "doc": "Ends the current window" },
+    { "label": "ImGui.BeginChild", "detail": "(id: string, size: table, border?: boolean, flags?: number) → boolean", "doc": "Begins a child window" },
+    { "label": "ImGui.EndChild", "detail": "() → nil", "doc": "Ends a child window" },
+    { "label": "ImGui.BeginMenu", "detail": "(label: string, enabled?: boolean) → boolean", "doc": "Begins a menu" },
+    { "label": "ImGui.EndMenu", "detail": "() → nil", "doc": "Ends a menu" },
+    { "label": "ImGui.BeginMenuBar", "detail": "() → boolean", "doc": "Begins a menu bar" },
+    { "label": "ImGui.EndMenuBar", "detail": "() → nil", "doc": "Ends a menu bar" },
+    { "label": "ImGui.MenuItem", "detail": "(label: string, shortcut?: string, selected?: boolean, enabled?: boolean) → boolean", "doc": "Creates a menu item" },
+    { "label": "ImGui.CollapsingHeader", "detail": "(label: string, flags?: number) → boolean", "doc": "Creates a collapsible header" },
+    { "label": "ImGui.TreeNode", "detail": "(label: string) → boolean", "doc": "Creates a tree node" },
+    { "label": "ImGui.TreeNodeEx", "detail": "(label: string, flags?: number) → boolean", "doc": "Tree node with extra options" },
+    { "label": "ImGui.TreePop", "detail": "() → nil", "doc": "Ends a tree node" },
+    { "label": "ImGui.SameLine", "detail": "(offsetX?: number, spacing?: number) → nil", "doc": "Places items on the same line" },
+    { "label": "ImGui.Separator", "detail": "() → nil", "doc": "Adds a separator line" },
+    { "label": "ImGui.BeginCombo", "detail": "(label: string, preview: string, flags?: number) → boolean", "doc": "Begins a combo box" },
+    { "label": "ImGui.EndCombo", "detail": "() → nil", "doc": "Ends a combo box" },
+    { "label": "ImGui.BeginListBox", "detail": "(label: string, size?: table) → boolean", "doc": "Begins a listbox" },
+    { "label": "ImGui.EndListBox", "detail": "() → nil", "doc": "Ends a listbox" },
+    { "label": "ImGui.Selectable", "detail": "(label: string, selected?: boolean, flags?: number, size?: table) → boolean", "doc": "Creates a selectable item" },
+    { "label": "ImGui.InputText", "detail": "(label: string, buffer: string, flags?: number) → string", "doc": "Creates an input text box" },
+    { "label": "ImGui.InputTextWithHint", "detail": "(label: string, hint: string, buffer: string, flags?: number) → string", "doc": "Input text with placeholder hint" },
+    { "label": "ImGui.SetItemDefaultFocus", "detail": "() → nil", "doc": "Sets default focus to the last item" },
+    { "label": "ImGui.SetKeyboardFocusHere", "detail": "(offset?: number) → nil", "doc": "Focus keyboard on next item" }
 ];
 
 /* ─── Class data for dot-completion ─── */

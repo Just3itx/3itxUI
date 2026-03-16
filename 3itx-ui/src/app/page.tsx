@@ -10,6 +10,7 @@ import SettingsPanel, { type ExecutorSettings } from "@/components/settings-pane
 import ScriptHubPanel from "@/components/script-hub-panel";
 import AccountManagerPanel, { type ClientInfo } from "@/components/account-manager";
 import RegionsPanel from "@/components/regions-panel";
+import SynAccountPanel from "@/components/syn-account-panel";
 import StatusBar from "@/components/status-bar";
 import { ToastContainer, useToast } from "@/components/toast";
 import { cn } from "@/lib/utils";
@@ -29,7 +30,10 @@ function loadSettings(): ExecutorSettings {
   if (typeof window === "undefined") return defaultSettings();
   try {
     const raw = localStorage.getItem("3itx-settings");
-    return raw ? { ...defaultSettings(), ...JSON.parse(raw) } : defaultSettings();
+    const merged = raw ? { ...defaultSettings(), ...JSON.parse(raw) } : defaultSettings();
+    // Ensure newer boolean fields are never undefined (prevents uncontrolled→controlled switch errors)
+    if (merged.autoSuggestions === undefined) merged.autoSuggestions = true;
+    return merged;
   } catch {
     return defaultSettings();
   }
@@ -46,11 +50,13 @@ function defaultSettings(): ExecutorSettings {
     wordWrap: false,
     lineNumbers: true,
     bracketPairColorization: true,
+    autoSuggestions: true,
     joinNotifications: true,
     joinNotificationDuration: 5,
     opacity: 100,
     editorFont: 13,
     theme: "default",
+    executionMethod: "scheduler",
   };
 }
 
@@ -157,6 +163,37 @@ export default function Home() {
   const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([]);
   const [consoleCollapsed, setConsoleCollapsed] = useState(false);
   const [consoleHeight, setConsoleHeight] = useState(220);
+  const [consolePoppedOut, setConsolePoppedOut] = useState(false);
+  const consolePoppedOutRef = useRef(false);
+  const consoleLinesRef = useRef<ConsoleLine[]>([]);
+
+  // Keep refs in sync
+  useEffect(() => { consoleLinesRef.current = consoleLines; }, [consoleLines]);
+  useEffect(() => { consolePoppedOutRef.current = consolePoppedOut; }, [consolePoppedOut]);
+
+  // Register callback for when C# closes the console window
+  useEffect(() => {
+    (window as any).__consoleWindowClosed = () => {
+      setConsolePoppedOut(false);
+      setConsoleCollapsed(false);
+    };
+    (window as any).__clearConsoleFromPopup = () => {
+      setConsoleLines([]);
+    };
+    return () => {
+      delete (window as any).__consoleWindowClosed;
+      delete (window as any).__clearConsoleFromPopup;
+    };
+  }, []);
+
+  const popOutConsole = useCallback(() => {
+    const wv = (window as any).chrome?.webview;
+    if (!wv) return;
+    const linesJson = JSON.stringify(consoleLinesRef.current);
+    wv.postMessage({ action: "openConsoleWindow", lines: linesJson });
+    setConsolePoppedOut(true);
+    setConsoleCollapsed(true);
+  }, []);
 
   // Settings
   const [settings, setSettings] = useState<ExecutorSettings>(loadSettings);
@@ -239,10 +276,15 @@ export default function Home() {
   // -- Console helpers
   const log = useCallback(
     (message: string, type: ConsoleLine["type"] = "", client?: string) => {
-      setConsoleLines((prev) => [
-        ...prev,
-        { id: lineId.current++, timestamp: timestamp(), message, type, client },
-      ]);
+      const line = { id: lineId.current++, timestamp: timestamp(), message, type, client };
+      setConsoleLines((prev) => [...prev, line]);
+      // Forward to popup ConsoleWindow if open
+      if (consolePoppedOutRef.current) {
+        try {
+          const lineJson = JSON.stringify(line);
+          (window as any).chrome?.webview?.postMessage({ action: "forwardConsoleLine", line: lineJson });
+        } catch {}
+      }
     },
     []
   );
@@ -324,6 +366,16 @@ export default function Home() {
     setActiveTabId(id);
   }, []);
 
+  // Register global callback for DEX "Insert to Editor" — creates a new tab with decompiled script content
+  useEffect(() => {
+    (window as any).__onDexInsertToEditor = (name: string, content: string) => {
+      const id = nextId.current++;
+      setTabs((prev) => [...prev, { id, name: name || "Decompiled", content }]);
+      setActiveTabId(id);
+    };
+    return () => { delete (window as any).__onDexInsertToEditor; };
+  }, []);
+
   const renameTab = useCallback((id: number, newName: string) => {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, name: newName } : t)));
   }, []);
@@ -355,11 +407,25 @@ export default function Home() {
   // -- Explorer file click -> open in tab (instant — loads content in background)
   const openExplorerFile = useCallback((node: ExplorerNode, root: "scripts" | "autoexec") => {
     if (node.type !== "file") return;
+
+    // Check if a tab with the same original fileName AND section is already open
+    const existingTab = tabs.find((t) => t.fileName === node.name && t.section === root);
+    if (existingTab) {
+      // Switch to existing tab instead of creating a duplicate
+      setActiveTabId(existingTab.id);
+      setPanel("editor");
+      // Refresh content from disk
+      fsBridge.readFile(root, node.name).then((diskContent) => {
+        setTabs((prev) => prev.map((t) => (t.id === existingTab.id ? { ...t, content: diskContent } : t)));
+      }).catch(() => { });
+      return;
+    }
+
     const id = nextId.current++;
     // Open tab instantly with whatever content we have (may be empty for new files)
     setTabs((prev) => {
       const name = uniqueTabName(node.name, prev);
-      return [...prev, { id, name, content: node.content ?? "" }];
+      return [...prev, { id, name, content: node.content ?? "", section: root, fileName: node.name }];
     });
     setActiveTabId(id);
     setPanel("editor");
@@ -367,7 +433,7 @@ export default function Home() {
     fsBridge.readFile(root, node.name).then((diskContent) => {
       setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, content: diskContent } : t)));
     }).catch(() => { /* file may not exist on disk yet */ });
-  }, [uniqueTabName]);
+  }, [uniqueTabName, tabs]);
 
   // -- Editor actions
   const execute = useCallback(() => {
@@ -386,7 +452,7 @@ export default function Home() {
     }
 
     if (settings.debugMode) log(`Executing "${tab.name}"...`, "info");
-    fsBridge.executeOnClients(pids, tab.content);
+    fsBridge.executeOnClients(pids, tab.content, settings.executionMethod);
     if (settings.debugMode) log(`Script sent to ${pids.length} client(s): PID ${pids.join(", ")}`, "success");
 
     showToast("Script executed", "success");
@@ -434,10 +500,13 @@ export default function Home() {
   const saveFile = useCallback(async () => {
     const tab = tabs.find((t) => t.id === activeTabId);
     if (!tab) return;
-    const fileName = tab.name.endsWith(".lua") || tab.name.endsWith(".luau") ? tab.name : tab.name + ".lua";
+    // Use original disk filename if available, otherwise fall back to display name
+    const baseName = tab.fileName || tab.name;
+    const fileName = baseName.endsWith(".lua") || baseName.endsWith(".luau") || baseName.endsWith(".txt") ? baseName : baseName + ".lua";
+    const section = tab.section || "scripts";
     try {
-      await fsBridge.writeFile("scripts", fileName, tab.content);
-      showToast(`Saved "${fileName}"`, "success");
+      await fsBridge.writeFile(section, fileName, tab.content);
+      showToast(`Saved "${fileName}" to ${section === "autoexec" ? "auto execution" : "scripts"}`, "success");
       refreshExplorer();
     } catch {
       showToast("Failed to save file", "error");
@@ -481,7 +550,7 @@ export default function Home() {
         showToast("No accounts selected", "error");
         return;
       }
-      fsBridge.executeOnClients(pids, content);
+      fsBridge.executeOnClients(pids, content, settings.executionMethod);
       showToast(`Executing "${title}"`, "success");
     },
     [selectedPids, showToast]
@@ -528,7 +597,7 @@ export default function Home() {
                 autoExecTree={autoExecTree}
                 onScriptsChange={setScriptsTree}
                 onAutoExecChange={setAutoExecTree}
-                activeFile={activeTab?.name || null}
+                activeFile={activeTab ? `${activeTab.section || "scripts"}:${activeTab.fileName || activeTab.name}` : null}
                 onFileClick={openExplorerFile}
                 searchQuery={explorerSearch}
                 onSearchChange={setExplorerSearch}
@@ -556,7 +625,9 @@ export default function Home() {
                   wordWrap={settings.wordWrap}
                   lineNumbers={settings.lineNumbers}
                   bracketPairColorization={settings.bracketPairColorization}
+                  autoSuggestions={settings.autoSuggestions}
                 />
+                {!consolePoppedOut && (
                 <ConsolePanel
                   lines={consoleLines}
                   collapsed={consoleCollapsed}
@@ -565,9 +636,16 @@ export default function Home() {
                   onHeightChange={setConsoleHeight}
                   onClear={() => {
                     setConsoleLines([]);
+                    if (consolePoppedOutRef.current) {
+                      try {
+                        (window as any).chrome?.webview?.postMessage({ action: "clearConsoleWindow" });
+                      } catch {}
+                    }
                     showToast("Console cleared", "info");
                   }}
+                  onPopOut={popOutConsole}
                 />
+                )}
               </div>
             )}
 
@@ -601,6 +679,13 @@ export default function Home() {
                 clients={clients}
                 selectedPids={selectedPids}
               />
+            )}
+
+            {/* Synapse Z Account */}
+            {panel === "synaccount" && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <SynAccountPanel />
+              </div>
             )}
           </div>
         </div>

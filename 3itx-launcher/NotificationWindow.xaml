@@ -51,11 +51,11 @@
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,1">
                         <TextBlock x:Name="DisplayNameText" FontSize="11.5" FontWeight="SemiBold"
-                                   FontFamily="Segoe UI" Foreground="#E4E4E7"/>
+                                   FontFamily="pack://application:,,,/Fonts/#JetBrains Mono" Foreground="#E4E4E7"/>
                         <TextBlock x:Name="UsernameText" FontSize="9" VerticalAlignment="Bottom"
-                                   Margin="5,0,0,0.5" FontFamily="Segoe UI" Foreground="#52525B"/>
+                                   Margin="5,0,0,0.5" FontFamily="pack://application:,,,/Fonts/#JetBrains Mono" Foreground="#52525B"/>
                     </StackPanel>
-                    <TextBlock Text="joined a server" FontSize="9.5" FontFamily="Segoe UI"
+                    <TextBlock Text="joined a server" FontSize="9.5" FontFamily="pack://application:,,,/Fonts/#JetBrains Mono"
                                Foreground="#5CFFFFFF"/>
                 </StackPanel>
             </Grid>
@@ -63,9 +63,9 @@
             <!-- Row 1: JobId -->
             <StackPanel Grid.Row="1" Margin="12,4,12,4">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="ID" FontSize="8" FontWeight="Medium" FontFamily="Segoe UI"
+                    <TextBlock Text="ID" FontSize="8" FontWeight="Medium" FontFamily="pack://application:,,,/Fonts/#JetBrains Mono"
                                Foreground="#40FFFFFF" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="JobIdText" FontSize="9" FontFamily="Consolas"
+                    <TextBlock x:Name="JobIdText" FontSize="9" FontFamily="pack://application:,,,/Fonts/#JetBrains Mono"
                                Foreground="#71717A" VerticalAlignment="Center"/>
                 </StackPanel>
             </StackPanel>
@@ -73,9 +73,9 @@
             <!-- Row 2: Timer footer -->
             <Border Grid.Row="2" Padding="12,5" BorderBrush="#10FFFFFF" BorderThickness="0,1,0,0">
                 <Grid>
-                    <TextBlock Text="joined a server" FontSize="9" FontFamily="Segoe UI"
+                    <TextBlock Text="joined a server" FontSize="9" FontFamily="pack://application:,,,/Fonts/#JetBrains Mono"
                                Foreground="#40FFFFFF" HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="TimerText" FontSize="9" FontFamily="Consolas"
+                    <TextBlock x:Name="TimerText" FontSize="9" FontFamily="pack://application:,,,/Fonts/#JetBrains Mono"
                                Foreground="#40FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                 </Grid>
             </Border>

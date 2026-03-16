@@ -15,7 +15,9 @@ export async function GET(req: NextRequest) {
     try {
         if (region) {
             // Fetch servers in a specific region
-            const url = `${ROVALRA_BASE}/get_servers_in_region?place_id=${placeId}&region=${encodeURIComponent(region)}`;
+            const cursor = req.nextUrl.searchParams.get("cursor");
+            let url = `${ROVALRA_BASE}/get_servers_in_region?place_id=${placeId}&region=${encodeURIComponent(region)}`;
+            if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
             const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
             if (!res.ok) {
                 return NextResponse.json({ error: `Rovalra returned ${res.status}` }, { status: 502 });

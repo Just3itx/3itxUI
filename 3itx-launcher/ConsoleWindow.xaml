@@ -1,0 +1,66 @@
+<Window x:Class="_3itx_launcher.ConsoleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Terminal"
+        Width="700" Height="400"
+        MinWidth="300" MinHeight="200"
+        WindowStyle="None"
+        Background="#0a0a0b"
+        ResizeMode="CanResize"
+        ShowInTaskbar="false"
+        Topmost="True">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="-1"
+                      CornerRadius="0" />
+    </WindowChrome.WindowChrome>
+
+    <Border CornerRadius="8" ClipToBounds="True" Margin="1,0,1,1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="28" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Title Bar -->
+            <Grid Grid.Row="0" Background="#0c0c0e"
+                  MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Status dot + title -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+
+                    <TextBlock x:Name="TitleText"
+                               Text="Terminal"
+                               FontFamily="pack://application:,,,/Fonts/#JetBrains Mono"
+                               FontSize="10"
+                               Foreground="#a1a1aa"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Close button -->
+                <Button Grid.Column="2" Click="Close_Click"
+                        Width="32" Height="28"
+                        Background="Transparent" BorderThickness="0"
+                        Foreground="#71717a" Cursor="Arrow">
+                    <Path Data="M0,0 L7,7 M7,0 L0,7" Stroke="#71717a" StrokeThickness="1" />
+                </Button>
+            </Grid>
+
+            <!-- Border under title -->
+            <Border Grid.Row="0" VerticalAlignment="Bottom"
+                    Height="1" Background="#1a1a1e" />
+
+            <!-- WebView2 -->
+            <wv2:WebView2 x:Name="ConsoleWebView" Grid.Row="1"
+                          DefaultBackgroundColor="#0a0a0b" />
+        </Grid>
+    </Border>
+</Window>
