@@ -14,6 +14,7 @@ export interface ExecutorSettings {
     unlockFPS: boolean;
     debugMode: boolean;
     redirectConsole: boolean;
+    consoleRedirectMethod: "script" | "api";
     wordWrap: boolean;
     lineNumbers: boolean;
     bracketPairColorization: boolean;
@@ -236,7 +237,27 @@ export default function SettingsPanel({ settings, onChange }: SettingsPanelProps
                             <Switch checked={settings.debugMode} onCheckedChange={(v) => update({ debugMode: v })} />
                         </SettingRow>
                         <SettingRow label="Redirect Console to UI" description="Forward print/warn/error output from instances">
-                            <Switch checked={settings.redirectConsole} onCheckedChange={(v) => update({ redirectConsole: v })} />
+                            <div className="flex items-center gap-2">
+                                {settings.redirectConsole && (
+                                    <div className="flex gap-1">
+                                        {(["script", "api"] as const).map((m) => (
+                                            <button
+                                                key={m}
+                                                onClick={() => update({ consoleRedirectMethod: m })}
+                                                className={cn(
+                                                    "px-2 py-0.5 rounded text-[10px] font-medium border transition-all",
+                                                    settings.consoleRedirectMethod === m
+                                                        ? "bg-white/[0.12] border-white/[0.2] text-foreground"
+                                                        : "bg-white/[0.03] border-white/[0.06] text-muted-foreground hover:bg-white/[0.06]"
+                                                )}
+                                            >
+                                                {m === "script" ? "Script" : "API"}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                <Switch checked={settings.redirectConsole} onCheckedChange={(v) => update({ redirectConsole: v })} />
+                            </div>
                         </SettingRow>
                     </div>
                 </section>

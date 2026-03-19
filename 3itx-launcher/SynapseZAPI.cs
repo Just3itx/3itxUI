@@ -10,10 +10,11 @@ namespace _3itx_launcher;
 
 public class SynapseZAPI
 {
-    private static string LatestErrorMsg = "";
+    [ThreadStatic]
+    private static string? LatestErrorMsg;
 
-    /// <summary>Returns the latest error message from any action.</summary>
-    public static string GetLatestErrorMessage() => LatestErrorMsg;
+    /// <summary>Returns the latest error message from any action (thread-local).</summary>
+    public static string GetLatestErrorMessage() => LatestErrorMsg ?? "";
 
     /// <summary>
     /// Execute a Lua script via the Synapse Z scheduler.
@@ -62,79 +63,98 @@ public class SynapseZAPI
     /// </summary>
     public static int SendPipeCommand(string command, int PID)
     {
-        string initialPipe = $"\\\\.\\pipe\\synz-{PID}";
+        const int maxRetries = 3;
+        const int baseDelayMs = 300;
 
-        try
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            // Connect to the initial pipe to get a session pipe name
-            using var client = new System.IO.Pipes.NamedPipeClientStream(".", $"synz-{PID}", System.IO.Pipes.PipeDirection.InOut);
-            client.Connect(500); // 500ms timeout
-            client.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
-
-            // Send "new" to create a session
-            var newCmd = Encoding.UTF8.GetBytes("new");
-            client.Write(newCmd, 0, newCmd.Length);
-            client.Flush();
-
-            // Read session pipe name
-            var buf = new byte[4096];
-            int read = client.Read(buf, 0, buf.Length);
-            if (read == 0)
+            try
             {
-                LatestErrorMsg = "Empty session pipe response";
-                return 2;
-            }
-            string sessionPipeName = Encoding.UTF8.GetString(buf, 0, read);
+                // Connect to the initial pipe to get a session pipe name
+                using var client = new System.IO.Pipes.NamedPipeClientStream(".", $"synz-{PID}", System.IO.Pipes.PipeDirection.InOut);
+                client.Connect(2000); // 2s timeout (up from 500ms)
+                client.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
 
-            // Extract just the pipe name (remove \\.\pipe\ prefix if present)
-            string sessionName = sessionPipeName;
-            if (sessionName.StartsWith("\\\\.\\pipe\\"))
-                sessionName = sessionName.Substring(9);
+                // Send "new" to create a session
+                var newCmd = Encoding.UTF8.GetBytes("new");
+                client.Write(newCmd, 0, newCmd.Length);
+                client.Flush();
 
-            // Connect to the session pipe
-            using var session = new System.IO.Pipes.NamedPipeClientStream(".", sessionName, System.IO.Pipes.PipeDirection.InOut);
-            session.Connect(500);
-            session.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
+                // Read session pipe name
+                var buf = new byte[4096];
+                int read = client.Read(buf, 0, buf.Length);
+                if (read == 0)
+                {
+                    LatestErrorMsg = "Empty session pipe response";
+                    return 2;
+                }
+                string sessionPipeName = Encoding.UTF8.GetString(buf, 0, read);
 
-            // Protocol: write number of commands, then each command
-            // We send 1 command (the actual command) + the implicit "read"
-            var cmdList = new[] { command, "read" };
-            var countBytes = Encoding.UTF8.GetBytes(cmdList.Length.ToString());
-            session.Write(countBytes, 0, countBytes.Length);
-            session.Flush();
+                // Extract just the pipe name (remove \\.\pipe\ prefix if present)
+                string sessionName = sessionPipeName;
+                if (sessionName.StartsWith("\\\\.\\pipe\\"))
+                    sessionName = sessionName.Substring(9);
 
-            foreach (var cmd in cmdList)
-            {
-                // Write command
-                var cmdBytes = Encoding.UTF8.GetBytes(cmd);
-                session.Write(cmdBytes, 0, cmdBytes.Length);
+                // Small delay to let session pipe spin up
+                System.Threading.Thread.Sleep(50);
+
+                // Connect to the session pipe
+                using var session = new System.IO.Pipes.NamedPipeClientStream(".", sessionName, System.IO.Pipes.PipeDirection.InOut);
+                session.Connect(2000);
+                session.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
+
+                // Protocol: write number of commands, then each command
+                var cmdList = new[] { command, "read" };
+                var countBytes = Encoding.UTF8.GetBytes(cmdList.Length.ToString());
+                session.Write(countBytes, 0, countBytes.Length);
                 session.Flush();
 
-                // Read number of responses
-                read = session.Read(buf, 0, buf.Length);
-                if (read == 0) continue;
-                string respCountStr = Encoding.UTF8.GetString(buf, 0, read);
-                if (!int.TryParse(respCountStr, out int numResponses)) continue;
-
-                // Read and discard responses
-                for (int i = 0; i < numResponses; i++)
+                foreach (var cmd in cmdList)
                 {
-                    _ = session.Read(buf, 0, buf.Length);
-                }
-            }
+                    // Write command
+                    var cmdBytes = Encoding.UTF8.GetBytes(cmd);
+                    session.Write(cmdBytes, 0, cmdBytes.Length);
+                    session.Flush();
 
-            return 0;
+                    // Read number of responses
+                    read = session.Read(buf, 0, buf.Length);
+                    if (read == 0) continue;
+                    string respCountStr = Encoding.UTF8.GetString(buf, 0, read);
+                    if (!int.TryParse(respCountStr, out int numResponses)) continue;
+
+                    // Read and discard responses
+                    for (int i = 0; i < numResponses; i++)
+                    {
+                        _ = session.Read(buf, 0, buf.Length);
+                    }
+                }
+
+                return 0;
+            }
+            catch (TimeoutException)
+            {
+                if (attempt < maxRetries - 1)
+                {
+                    System.Threading.Thread.Sleep(baseDelayMs * (attempt + 1));
+                    continue; // Retry
+                }
+                LatestErrorMsg = $"Pipe synz-{PID} not found (timeout after {maxRetries} attempts)";
+                return 1;
+            }
+            catch (Exception e)
+            {
+                if (attempt < maxRetries - 1)
+                {
+                    System.Threading.Thread.Sleep(baseDelayMs * (attempt + 1));
+                    continue; // Retry
+                }
+                LatestErrorMsg = e.Message;
+                return 3;
+            }
         }
-        catch (TimeoutException)
-        {
-            LatestErrorMsg = $"Pipe synz-{PID} not found (timeout)";
-            return 1;
-        }
-        catch (Exception e)
-        {
-            LatestErrorMsg = e.Message;
-            return 3;
-        }
+
+        LatestErrorMsg = $"Pipe synz-{PID} failed after {maxRetries} attempts";
+        return 1;
     }
 
     /// <summary>

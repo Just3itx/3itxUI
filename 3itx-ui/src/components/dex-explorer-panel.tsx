@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
     Search, ChevronRight, ChevronDown, X, Copy, Eye, EyeOff,
-    Loader2, FolderTree, FileCode, RotateCcw, Activity, WifiOff
+    Loader2, FolderTree, FileCode, RotateCcw, Activity, WifiOff, Camera, Crosshair
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import * as fsBridge from "@/lib/fs-bridge";
@@ -289,6 +289,9 @@ export default function DexExplorerPanel({ pid, username, onClose }: DexExplorer
     const dexClipboard = useRef<{ path: string; isCut: boolean } | null>(null);
     const [colorPickerProp, setColorPickerProp] = useState<{ name: string; r: number; g: number; b: number; posX: number; posY: number; isBrickColor?: boolean } | null>(null);
     const [disconnected, setDisconnected] = useState(false);
+    const [viewingObject, setViewingObject] = useState<string | null>(null);
+    const [clickToSelect, setClickToSelect] = useState(false);
+    const [clickSelectTask, setClickSelectTask] = useState<{ segs: string[]; step: number; path: string } | null>(null);
 
     /* ─── Instant disconnect/reconnect signal from C# ─── */
     useEffect(() => {
@@ -314,6 +317,13 @@ export default function DexExplorerPanel({ pid, username, onClose }: DexExplorer
                 setProperties([]);
                 setSearchQuery("");
                 setSearchResults([]);
+                setViewingObject(null);
+                setClickToSelect(false);
+                // Clean up click-to-select handler if active
+                if ((window as any).__cpts_handler) {
+                    fsBridge.offDexData((window as any).__cpts_handler);
+                    delete (window as any).__cpts_handler;
+                }
             }
         };
         return () => { delete (window as any).__onDexConnectionStatus; };
@@ -676,8 +686,8 @@ if not ${varName} then error("nil instance not found") end`;
         local found = false
         for _, child in ipairs(${varName}:GetChildren()) do
             if child.Name == name then
-                if count == idx then ${varName} = child; found = true; break end
                 count = count + 1
+                if count == idx then ${varName} = child; found = true; break end
             end
         end
         if not found then error("not found") end
@@ -699,8 +709,8 @@ for _, part in {"${parts.join('","')}"} do
         local found = false
         for _, child in ipairs(${varName}:GetChildren()) do
             if child.Name == name then
-                if count == idx then ${varName} = child; found = true; break end
                 count = count + 1
+                if count == idx then ${varName} = child; found = true; break end
             end
         end
         if not found then error("not found") end
@@ -717,15 +727,17 @@ end`;
     const insertObject = useCallback((parentPath: string, className: string) => {
         fsBridge.executeOnClients([pid], `pcall(function()
 ${luaResolve("target", parentPath)}
-local inst = Instance.new("${className}")
+local inst = Instance.new("${className}", target)
 if inst:IsA("BasePart") then
     inst.Anchored = true
     local plr = game:GetService("Players").LocalPlayer
     local char = plr and plr.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then inst.CFrame = hrp.CFrame * CFrame.new(0, 0, -10) end
+    if hrp then inst.Position = (hrp.CFrame * CFrame.new(0, 0, -10)).Position end
+elseif inst:IsA("GuiObject") then
+    inst.Active = true
+    if inst.Parent:IsA("ScreenGui") then inst.Position = UDim2.new(0.5, 0, 0.5, 0) end
 end
-inst.Parent = target
 end)`);
     }, [pid]);
 
@@ -830,6 +842,59 @@ end)`);
         if (result?.properties) setProperties(result.properties);
         setPropsLoading(false);
     }, [sendRequest, showHidden, showDeprecated, tree]);
+
+    /* ─── Click-to-select: step-by-step expansion with fresh refs ─── */
+    useEffect(() => {
+        if (!clickSelectTask) return;
+        const { segs, step, path } = clickSelectTask;
+
+        if (step >= segs.length) {
+            // All ancestors expanded — select + scroll
+            setClickSelectTask(null);
+            selectNode(path);
+            // Retry scroll until element renders
+            let attempts = 0;
+            const tryScroll = () => {
+                const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`);
+                if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                } else if (attempts < 15) {
+                    attempts++;
+                    setTimeout(tryScroll, 150);
+                }
+            };
+            setTimeout(tryScroll, 100);
+            return;
+        }
+
+        // Expand one level using fresh sendRequest
+        const seg = segs[step];
+        const expandPath = step === 0 ? "game" : "game." + segs.slice(0, step).join(".");
+        const nextPath = expandPath + "." + seg;
+        (async () => {
+            const result = await sendRequest("dex_getChildren", { path: expandPath });
+            if (result?.children) {
+                const nameCounts: Record<string, number> = {};
+                const children: TreeNode[] = result.children.map((c: any) => {
+                    const count = nameCounts[c.name] || 0;
+                    nameCounts[c.name] = count + 1;
+                    const childPath = count > 0 ? `${expandPath}.${c.name}[${count}]` : `${expandPath}.${c.name}`;
+                    return { name: c.name, className: c.className, path: childPath, hasChildren: c.hasChildren, loaded: false, expanded: false };
+                });
+                setTree(prev => {
+                    const u = (nodes: TreeNode[]): TreeNode[] =>
+                        nodes.map(n => {
+                            if (n.path === expandPath) return { ...n, loaded: true, expanded: true, children };
+                            if (n.children) return { ...n, children: u(n.children) };
+                            return n;
+                        });
+                    return u(prev);
+                });
+            }
+            // Advance to next step (triggers re-render → fresh refs → next useEffect call)
+            setClickSelectTask({ segs, step: step + 1, path: nextPath });
+        })();
+    }, [clickSelectTask, sendRequest, selectNode]);
 
 
     /* ─── Live property watching ─── */
@@ -996,7 +1061,7 @@ end)`);
                             const reqId = "jp_" + Date.now() + "_" + i;
                             const result = await new Promise<any>((resolve) => {
                                 const timeout = setTimeout(() => resolve(null), 5000);
-                                const handler = (data: any) => {
+                                const handler = (_: any, data: any) => {
                                     if (data?.requestId === reqId) {
                                         clearTimeout(timeout);
                                         fsBridge.offDexData(handler);
@@ -1108,7 +1173,7 @@ end)`);
                     break;
                 }
                 case "insertObject":
-                    fsBridge.dexRequest(pid, "dex_insertObject", { parentPath: path, className });
+                    insertObject(path, className);
                     // Refresh target node to show new child
                     setTimeout(() => {
                         setTree(prev => {
@@ -1153,6 +1218,169 @@ elseif target:IsA("Model") then
             if part.CanCollide then char:MoveTo(part.Position) else hrp.CFrame = CFrame.new(part.Position + Vector3.new(0,3,0)) end
         end
     end
+end
+end)`);
+                    break;
+                case "viewObject":
+                    fsBridge.executeOnClients([pid], `pcall(function()
+${luaResolve("target", treePath || path)}
+if target:IsA("BasePart") or target:IsA("Model") then
+    workspace.CurrentCamera.CameraSubject = target
+end
+end)`);
+                    setViewingObject(treePath || path);
+                    break;
+                case "selectLocalPlayer": {
+                    const reqId = "slp_" + Date.now();
+                    const handler = (_: any, data: any) => {
+                        if (data?.type === "dex_charPath" && data?.requestId === reqId && data?.charPath) {
+                            fsBridge.offDexData(handler);
+                            const targetPath = "game." + data.charPath.replace(/^game\./, "");
+                            setSearchQuery("");
+                            (async () => {
+                                const segs = targetPath.split(".");
+                                for (let i = 2; i <= segs.length; i++) {
+                                    const ancestorPath = segs.slice(0, i).join(".");
+                                    const aReqId = "slp_a_" + Date.now() + "_" + i;
+                                    const result = await new Promise<any>((resolve) => {
+                                        const timeout = setTimeout(() => resolve(null), 5000);
+                                        const h = (_: any, d: any) => {
+                                            if (d?.requestId === aReqId) {
+                                                clearTimeout(timeout);
+                                                fsBridge.offDexData(h);
+                                                resolve(d);
+                                            }
+                                        };
+                                        fsBridge.onDexData(h);
+                                        fsBridge.dexRequest(pid, "dex_getChildren", { path: ancestorPath, requestId: aReqId });
+                                    });
+                                    if (result?.children) {
+                                        const nameCounts: Record<string, number> = {};
+                                        const children: TreeNode[] = result.children.map((c: any) => {
+                                            const count = nameCounts[c.name] || 0;
+                                            nameCounts[c.name] = count + 1;
+                                            const childPath = count > 0 ? `${ancestorPath}.${c.name}[${count}]` : `${ancestorPath}.${c.name}`;
+                                            return { name: c.name, className: c.className, path: childPath, hasChildren: c.hasChildren, loaded: false, expanded: false };
+                                        });
+                                        setTree(prev => {
+                                            const u = (nodes: TreeNode[]): TreeNode[] =>
+                                                nodes.map(n => {
+                                                    if (n.path === ancestorPath) return { ...n, loaded: true, expanded: true, children };
+                                                    if (n.children) return { ...n, children: u(n.children) };
+                                                    return n;
+                                                });
+                                            return u(prev);
+                                        });
+                                        await new Promise(r => setTimeout(r, 50));
+                                    }
+                                }
+                                selectNode(targetPath);
+                                setTimeout(() => {
+                                    const el = document.querySelector(`[data-path="${CSS.escape(targetPath)}"]`);
+                                    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                }, 200);
+                            })();
+                        }
+                    };
+                    fsBridge.onDexData(handler);
+                    setTimeout(() => fsBridge.offDexData(handler), 10000); // cleanup after 10s
+                    fsBridge.executeOnClients([pid], `pcall(function()
+local plr = game:GetService("Players").LocalPlayer
+if plr and plr.Character and plr.Character.Parent then
+    local HttpService = game:GetService("HttpService")
+    local ws = getgenv().__3itx_ws
+    if ws then ws:Send(HttpService:JSONEncode({type="dex_charPath",requestId="${reqId}",charPath=plr.Character:GetFullName()})) end
+end
+end)`);
+                    break;
+                }
+                case "selectCharacter": {
+                    const reqId = "sc_" + Date.now();
+                    const handler = (_: any, data: any) => {
+                        if (data?.type === "dex_charPath" && data?.requestId === reqId && data?.charPath) {
+                            fsBridge.offDexData(handler);
+                            const targetPath = "game." + data.charPath.replace(/^game\./, "");
+                            setSearchQuery("");
+                            (async () => {
+                                const segs = targetPath.split(".");
+                                for (let i = 2; i <= segs.length; i++) {
+                                    const ancestorPath = segs.slice(0, i).join(".");
+                                    const aReqId = "sc_a_" + Date.now() + "_" + i;
+                                    const result = await new Promise<any>((resolve) => {
+                                        const timeout = setTimeout(() => resolve(null), 5000);
+                                        const h = (_: any, d: any) => {
+                                            if (d?.requestId === aReqId) {
+                                                clearTimeout(timeout);
+                                                fsBridge.offDexData(h);
+                                                resolve(d);
+                                            }
+                                        };
+                                        fsBridge.onDexData(h);
+                                        fsBridge.dexRequest(pid, "dex_getChildren", { path: ancestorPath, requestId: aReqId });
+                                    });
+                                    if (result?.children) {
+                                        const nameCounts: Record<string, number> = {};
+                                        const children: TreeNode[] = result.children.map((c: any) => {
+                                            const count = nameCounts[c.name] || 0;
+                                            nameCounts[c.name] = count + 1;
+                                            const childPath = count > 0 ? `${ancestorPath}.${c.name}[${count}]` : `${ancestorPath}.${c.name}`;
+                                            return { name: c.name, className: c.className, path: childPath, hasChildren: c.hasChildren, loaded: false, expanded: false };
+                                        });
+                                        setTree(prev => {
+                                            const u = (nodes: TreeNode[]): TreeNode[] =>
+                                                nodes.map(n => {
+                                                    if (n.path === ancestorPath) return { ...n, loaded: true, expanded: true, children };
+                                                    if (n.children) return { ...n, children: u(n.children) };
+                                                    return n;
+                                                });
+                                            return u(prev);
+                                        });
+                                        await new Promise(r => setTimeout(r, 50));
+                                    }
+                                }
+                                selectNode(targetPath);
+                                setTimeout(() => {
+                                    const el = document.querySelector(`[data-path="${CSS.escape(targetPath)}"]`);
+                                    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                }, 200);
+                            })();
+                        }
+                    };
+                    fsBridge.onDexData(handler);
+                    setTimeout(() => fsBridge.offDexData(handler), 10000);
+                    fsBridge.executeOnClients([pid], `pcall(function()
+${luaResolve("target", treePath || path)}
+if target:IsA("Player") and target.Character and target.Character.Parent then
+    local HttpService = game:GetService("HttpService")
+    local ws = getgenv().__3itx_ws
+    if ws then ws:Send(HttpService:JSONEncode({type="dex_charPath",requestId="${reqId}",charPath=target.Character:GetFullName()})) end
+end
+end)`);
+                    break;
+                }
+                case "fireTouchTransmitter":
+                    fsBridge.executeOnClients([pid], `pcall(function()
+${luaResolve("target", treePath || path)}
+if target:IsA("TouchTransmitter") then
+    local plr = game:GetService("Players").LocalPlayer
+    local hrp = plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then firetouchinterest(hrp, target.Parent, 0) end
+end
+end)`);
+                    break;
+                case "fireClickDetector":
+                    fsBridge.executeOnClients([pid], `pcall(function()
+${luaResolve("target", treePath || path)}
+if target:IsA("ClickDetector") then
+    fireclickdetector(target)
+end
+end)`);
+                    break;
+                case "fireProximityPrompt":
+                    fsBridge.executeOnClients([pid], `pcall(function()
+${luaResolve("target", treePath || path)}
+if target:IsA("ProximityPrompt") then
+    fireproximityprompt(target)
 end
 end)`);
                     break;
@@ -1475,6 +1703,44 @@ end)`);
     /* ─── Render ─── */
     return (
         <div className="flex-1 flex flex-col overflow-hidden bg-[#0a0a0b] relative" onMouseDown={() => fsBridge.closeDexContextMenu()}>
+            {/* Stop Viewing spinning border + appear keyframes */}
+            <style>{`
+                @keyframes dex-border-spin {
+                    0% { --dex-spin-angle: 0deg; }
+                    100% { --dex-spin-angle: 360deg; }
+                }
+                @keyframes dex-view-appear {
+                    0% { opacity: 0; transform: translateY(-6px); max-height: 0; margin: 0; padding-top: 0; padding-bottom: 0; }
+                    100% { opacity: 1; transform: translateY(0); max-height: 40px; }
+                }
+                @property --dex-spin-angle {
+                    syntax: '<angle>';
+                    initial-value: 0deg;
+                    inherits: false;
+                }
+                .dex-stop-viewing-btn {
+                    position: relative;
+                    border: 1px solid transparent;
+                    background-clip: padding-box;
+                    animation: dex-view-appear 0.3s ease-out forwards;
+                }
+                .dex-stop-viewing-btn::before {
+                    content: '';
+                    position: absolute;
+                    inset: -1px;
+                    border-radius: inherit;
+                    padding: 1px;
+                    background: conic-gradient(from var(--dex-spin-angle), rgba(255,60,60,0.5), transparent 40%, transparent 60%, rgba(255,60,60,0.5));
+                    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+                    -webkit-mask-composite: xor;
+                    mask-composite: exclude;
+                    animation: dex-border-spin 2s linear infinite;
+                    pointer-events: none;
+                }
+                .dex-stop-viewing-btn:hover::before {
+                    background: conic-gradient(from var(--dex-spin-angle), rgba(255,60,60,0.8), transparent 40%, transparent 60%, rgba(255,60,60,0.8));
+                }
+            `}</style>
             {/* No Signal overlay when client disconnects */}
             {disconnected && (
                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0b]/90 backdrop-blur-sm">
@@ -1601,6 +1867,12 @@ end)`);
                                                     selectedSearchKey.current = row.key;
                                                     selectNode(row.path);
                                                 }}
+                                                onDoubleClick={() => {
+                                                    const isScript = row.className === 'LocalScript' || row.className === 'ModuleScript' || row.className === 'Script';
+                                                    if (isScript) {
+                                                        fsBridge.dexDoubleClick(row.path, row.name, row.className);
+                                                    }
+                                                }}
                                                 onContextMenu={(e) => {
                                                     e.preventDefault();
                                                     // Pass copyPath for the copy action, raw tree path for navigation (jump-to, parent)
@@ -1713,6 +1985,25 @@ end)`);
                         </div>
                     </div>
 
+                    {/* ═══ STOP VIEWING BUTTON ═══ */}
+                    {viewingObject && (
+                        <button
+                            onClick={() => {
+                                fsBridge.executeOnClients([pid], `pcall(function()
+local plr = game:GetService("Players").LocalPlayer
+if plr and plr.Character then
+    workspace.CurrentCamera.CameraSubject = plr.Character:FindFirstChildWhichIsA("Humanoid") or plr.Character
+end
+end)`);
+                                setViewingObject(null);
+                            }}
+                            className="dex-stop-viewing-btn flex items-center justify-center gap-1 shrink-0 mx-1.5 my-1 px-1.5 py-[2px] rounded text-[9px] font-medium text-red-400/80 bg-white/[0.03] cursor-pointer hover:text-red-300 hover:bg-white/[0.06] transition-colors"
+                        >
+                            <Camera className="w-2.5 h-2.5" />
+                            Stop Viewing
+                        </button>
+                    )}
+
                     {/* ═══ RESIZE HANDLE ═══ */}
                     <div
                         className="h-[3px] bg-white/[0.06] cursor-row-resize hover:bg-white/[0.15] transition-colors shrink-0"
@@ -1764,6 +2055,86 @@ end)`);
                                     <div className="relative bg-[#1a1a1e] border border-white/[0.1] rounded px-1.5 py-0.5 whitespace-nowrap shadow-lg">
                                         <div className="absolute left-1/2 -translate-x-1/2 -top-[4px] w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[4px] border-b-white/[0.1]" />
                                         <span className="text-[8px] text-white/60">Show Deprecated</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="group relative">
+                                <button
+                                    onClick={() => {
+                                        const newVal = !clickToSelect;
+                                        setClickToSelect(newVal);
+                                        if (newVal) {
+                                            // Set up onDexData listener for click responses
+                                            const handler = (_: any, data: any) => {
+                                                if (data?.type === "dex_clickSelect" && data?.targetPath) {
+                                                    // targetPath includes [N] dedup indices from Lua, e.g. "Workspace.Model.Part[1]"
+                                                    const rawPath = data.targetPath.replace(/^game\./, "");
+                                                    const segs = rawPath.split(".");
+                                                    setSearchQuery("");
+                                                    // Kick off step-by-step expansion via useEffect (fresh refs at each step)
+                                                    setClickSelectTask({ segs, step: 0, path: "game" });
+                                                }
+                                            };
+                                            (window as any).__cpts_handler = handler;
+                                            fsBridge.onDexData(handler);
+                                            // Send Lua to connect Mouse.Button1Down — builds unique path with [N] dedup
+                                            fsBridge.executeOnClients([pid], `pcall(function()
+local plr = game:GetService("Players").LocalPlayer
+local mouse = plr:GetMouse()
+local HttpService = game:GetService("HttpService")
+local ws = getgenv().__3itx_ws
+if getgenv().__cpts_conn then pcall(function() getgenv().__cpts_conn:Disconnect() end) end
+-- Build a unique path with [N] indices for same-named siblings
+local function getUniquePath(inst)
+    local parts = {}
+    local cur = inst
+    while cur and cur ~= game do
+        local parent = cur.Parent
+        if parent then
+            local name = cur.Name
+            local idx = 0
+            for _, sib in ipairs(parent:GetChildren()) do
+                if sib == cur then break end
+                if sib.Name == name then idx = idx + 1 end
+            end
+            if idx > 0 then
+                table.insert(parts, 1, name .. "[" .. idx .. "]")
+            else
+                table.insert(parts, 1, name)
+            end
+        end
+        cur = cur.Parent
+    end
+    return table.concat(parts, ".")
+end
+getgenv().__cpts_conn = mouse.Button1Down:Connect(function()
+    pcall(function()
+        local target = mouse.Target
+        if target and ws then
+            ws:Send(HttpService:JSONEncode({type="dex_clickSelect",targetPath=getUniquePath(target)}))
+        end
+    end)
+end)
+end)`);
+                                        } else {
+                                            // Disconnect
+                                            if ((window as any).__cpts_handler) {
+                                                fsBridge.offDexData((window as any).__cpts_handler);
+                                                delete (window as any).__cpts_handler;
+                                            }
+                                            fsBridge.executeOnClients([pid], `pcall(function()
+if getgenv().__cpts_conn then getgenv().__cpts_conn:Disconnect() getgenv().__cpts_conn = nil end
+end)`);
+                                        }
+                                    }}
+                                    className={cn("w-4 h-4 flex items-center justify-center rounded-sm transition-colors",
+                                        clickToSelect ? "text-sky-400" : "text-white/20 hover:text-white/40")}>
+                                    <Crosshair className="w-2.5 h-2.5" />
+                                </button>
+                                <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-1.5 opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 transition-all duration-200 origin-top z-50">
+                                    <div className="relative bg-[#1a1a1e] border border-white/[0.1] rounded px-1.5 py-0.5 whitespace-nowrap shadow-lg">
+                                        <div className="absolute left-1/2 -translate-x-1/2 -top-[4px] w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[4px] border-b-white/[0.1]" />
+                                        <span className="text-[8px] text-white/60">Click Part to Select</span>
                                     </div>
                                 </div>
                             </div>

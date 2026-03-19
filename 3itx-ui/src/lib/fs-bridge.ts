@@ -262,10 +262,12 @@ export async function refreshClients(): Promise<any[]> {
     return [];
 }
 
-/** Enable/disable console redirect (hookfunction print/warn/error) on all connected clients */
-export async function setConsoleRedirect(enabled: boolean): Promise<boolean> {
+/** Enable/disable console redirect on all connected clients
+ * @param method "script" = Lua hookfunction, "api" = SynapseZAPI2 pipe output
+ */
+export async function setConsoleRedirect(enabled: boolean, method: "script" | "api" = "script"): Promise<boolean> {
     if (isWebView2()) {
-        await send({ action: "setConsoleRedirect", enabled });
+        await send({ action: "setConsoleRedirect", enabled, method });
         return true;
     }
     return false;

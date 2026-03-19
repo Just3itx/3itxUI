@@ -112,6 +112,21 @@ local function disableConsoleRedirect()
     end
 end
 
+-- ─── Console redirect (API — handled by SynapseZAPI2 pipes on C# side) ───
+local _apiConsoleEnabled = false
+
+local function enableConsoleRedirectAPI()
+    if _apiConsoleEnabled then return end
+    _apiConsoleEnabled = true
+    -- Console output captured by SynapseZAPI2 SessionLoop pipe on the C# side
+    -- No Lua hooks needed
+end
+
+local function disableConsoleRedirectAPI()
+    if not _apiConsoleEnabled then return end
+    _apiConsoleEnabled = false
+end
+
 -- ─── LSP Connect — serialize game tree over WebSocket ───
 local _lspEnabled = false
 local _lspConnections = {}
@@ -259,9 +274,19 @@ local function onMessage(msg)
         end)
     elseif data.type == "enableConsoleRedirect" then
         if data.enabled then
-            enableConsoleRedirect()
+            local method = data.method or "script"
+            if method == "api" then
+                -- API: LogService.MessageOut (non-invasive, keeps Roblox console)
+                disableConsoleRedirect() -- ensure hookfunction is off
+                enableConsoleRedirectAPI()
+            else
+                -- Script: hookfunction (suppresses Roblox console)
+                disableConsoleRedirectAPI() -- ensure API is off
+                enableConsoleRedirect()
+            end
         else
             disableConsoleRedirect()
+            disableConsoleRedirectAPI()
         end
     elseif data.type == "enableLSP" then
         if data.enabled then
@@ -1450,8 +1475,7 @@ local function onMessage(msg)
             local parent = resolvePath(parentPath)
             if parent and className ~= "" then
                 local ok, err = pcall(function()
-                    local inst = Instance.new(className)
-                    inst.Parent = parent
+                    Instance.new(className, parent)
                 end)
                 wsSend({ type = "dex_insertObjectResult", requestId = requestId, success = ok, error = not ok and tostring(err) or nil })
             else
@@ -1956,6 +1980,7 @@ local function connect()
             end
             -- Disable redirect + LSP on disconnect
             disableConsoleRedirect()
+            disableConsoleRedirectAPI()
             disableLSP()
             -- Retry reconnection in a loop
             task.spawn(function()

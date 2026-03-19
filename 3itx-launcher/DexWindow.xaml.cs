@@ -349,9 +349,40 @@ public partial class DexWindow : Window
                                             items.Add(new ContextMenuItemData { Label = "Teleport To", ActionId = "teleportTo", Icon = "\uE81D" });
                                         }
 
+                                        // View Object for BasePart subclasses and Model
+                                        var viewableClasses = new HashSet<string> {
+                                            "Part", "MeshPart", "WedgePart", "TrussPart", "SpawnLocation",
+                                            "CornerWedgePart", "Seat", "VehicleSeat", "UnionOperation",
+                                            "NegateOperation", "IntersectOperation", "Model"
+                                        };
+                                        if (viewableClasses.Contains(instanceClass))
+                                        {
+                                            items.Add(new ContextMenuItemData { Label = "View Object", ActionId = "viewObject", Icon = "\uE7B3" });
+                                        }
+
                                         // View Script for Script/LocalScript/ModuleScript
                                         if (instanceClass is "LocalScript" or "ModuleScript" or "Script")
                                             items.Add(new ContextMenuItemData { Label = "View Script", ActionId = "viewScript", Icon = "\uE943" });
+
+                                        // Select LocalPlayer when right-clicking Players service
+                                        if (treePath == "game.Players")
+                                            items.Add(new ContextMenuItemData { Label = "Select LocalPlayer", ActionId = "selectLocalPlayer", Icon = "\uE77B" });
+
+                                        // Select Character when right-clicking a Player instance
+                                        if (instanceClass == "Player")
+                                            items.Add(new ContextMenuItemData { Label = "Select Character", ActionId = "selectCharacter", Icon = "\uE77B" });
+
+                                        // Fire TouchTransmitter
+                                        if (instanceClass == "TouchTransmitter")
+                                            items.Add(new ContextMenuItemData { Label = "Fire TouchTransmitter", ActionId = "fireTouchTransmitter", Icon = "\uE815" });
+
+                                        // Fire ClickDetector
+                                        if (instanceClass == "ClickDetector")
+                                            items.Add(new ContextMenuItemData { Label = "Fire ClickDetector", ActionId = "fireClickDetector", Icon = "\uE8B0" });
+
+                                        // Fire ProximityPrompt
+                                        if (instanceClass == "ProximityPrompt")
+                                            items.Add(new ContextMenuItemData { Label = "Fire ProximityPrompt", ActionId = "fireProximityPrompt", Icon = "\uE815" });
 
                                         items.Add(new ContextMenuItemData { Separator = true });
                                         items.Add(new ContextMenuItemData { Label = "Select Children", ActionId = "selectChildren", Icon = "\uE8B3" });

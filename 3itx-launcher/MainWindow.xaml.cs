@@ -26,7 +26,7 @@ public partial class MainWindow : Window
     private const string ServerUrl = "http://localhost:9367";
     private const int MaxRetries = 240;
     private const int WsPort = 24892;
-    private const string CurrentVersion = "1.0.6";
+    private const string CurrentVersion = "1.0.7";
     private const string VersionCheckUrl = "https://raw.githubusercontent.com/Just3itx/3itxUI/refs/heads/main/Verison.json";
     private const string ReleasesUrl = "https://github.com/Just3itx/3itxUI/releases/tag/Latest";
 
@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private static readonly Random _rng = new();
     private static readonly HttpClient _httpClient = new();
     private bool _consoleRedirectEnabled = false;
+    private string _consoleRedirectMethod = "script";
     private bool _lspConnectEnabled = false;
     private bool _unlockFPSEnabled = false;
     private NotificationWindow? _activeNotification;
@@ -180,7 +181,8 @@ public partial class MainWindow : Window
         {
             var block = new System.Windows.Shapes.Rectangle
             {
-                Width = 12, Height = 14,
+                Width = 12,
+                Height = 14,
                 Fill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Black),
                 Margin = new Thickness(1, 0, 1, 0),
             };
@@ -475,6 +477,33 @@ public partial class MainWindow : Window
         _pollTimer = new Timer(_ => PollRobloxProcesses(), null, 3000, 3000);
         _pingTimer = new Timer(_ => PingAllClients(), null, 5000, 5000);
 
+        // Start SynapseZAPI2 pipe-based session detection + console output
+        SynapseZAPI2.StartInstancesTimer();
+        SynapseZAPI2.SessionOutput += (session, type, output) =>
+        {
+            var level = type switch
+            {
+                0 => "info",    // print
+                1 => "info",    // info
+                2 => "warning", // warn
+                3 => "error",   // error
+                _ => "info"
+            };
+            var clientName = $"PID {session.Pid}";
+            var wsClient = _wsClients.Values.FirstOrDefault(c => c.Pid == (int)session.Pid);
+            if (wsClient != null) clientName = wsClient.DisplayName;
+
+            Dispatcher.InvokeAsync(() => PushLogToUi(clientName, (int)session.Pid, level, output));
+        };
+        SynapseZAPI2.SessionAdded += (session) =>
+        {
+            Dispatcher.InvokeAsync(() => PushLogToUi("System", 0, "info", $"[API2] Pipe session connected for PID {session.Pid}"));
+        };
+        SynapseZAPI2.SessionRemoved += (session) =>
+        {
+            Dispatcher.InvokeAsync(() => PushLogToUi("System", 0, "warning", $"[API2] Pipe session disconnected for PID {session.Pid}"));
+        };
+
         // Intercept window.open() calls and redirect to default browser
         WebView.CoreWebView2.NewWindowRequested += (sender, args) =>
         {
@@ -634,7 +663,7 @@ public partial class MainWindow : Window
                             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                             "Synapse Z", "autoexec");
                         if (!Directory.Exists(synapseAutoExec)) Directory.CreateDirectory(synapseAutoExec);
-                        
+
                         if (enable)
                         {
                             // Copy all files from our AutoExec folder to Synapse Z autoexec with 3itx_ prefix
@@ -702,33 +731,42 @@ public partial class MainWindow : Window
                                 }
                                 else if (execMethod == "piper")
                                 {
-                                    // Use named pipe to send script (with 5s timeout to prevent hangs)
-                                    _ = Task.Run(async () =>
+                                    // Prefer API2 session if available (avoids pipe contention with SessionLoop)
+                                    if (SynapseZAPI2.TryGetSession((uint)targetPid, out var api2Session))
                                     {
-                                        try
+                                        api2Session.Execute(scriptToExec);
+                                        Debug.WriteLine($"[Execute:Piper] Sent via API2 session for PID {targetPid}");
+                                    }
+                                    else
+                                    {
+                                        // Fallback: create a one-shot pipe connection (with 5s timeout to prevent hangs)
+                                        _ = Task.Run(async () =>
                                         {
-                                            var pipeTask = Task.Run(() => SynapseZAPI.SendPipeCommand("execute " + scriptToExec, targetPid));
-                                            if (await Task.WhenAny(pipeTask, Task.Delay(5000)) == pipeTask)
+                                            try
                                             {
-                                                var pipeResult = pipeTask.Result;
-                                                if (pipeResult != 0)
+                                                var pipeTask = Task.Run(() => SynapseZAPI.SendPipeCommand("execute " + scriptToExec, targetPid));
+                                                if (await Task.WhenAny(pipeTask, Task.Delay(5000)) == pipeTask)
                                                 {
-                                                    Debug.WriteLine($"[Execute:Piper] Failed for PID {targetPid}: {SynapseZAPI.GetLatestErrorMessage()}");
-                                                    PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper error: {SynapseZAPI.GetLatestErrorMessage()}");
+                                                    var pipeResult = pipeTask.Result;
+                                                    if (pipeResult != 0)
+                                                    {
+                                                        Debug.WriteLine($"[Execute:Piper] Failed for PID {targetPid}: {SynapseZAPI.GetLatestErrorMessage()}");
+                                                        PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper error: {SynapseZAPI.GetLatestErrorMessage()}");
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    Debug.WriteLine($"[Execute:Piper] Timeout for PID {targetPid}");
+                                                    PushLogToUi($"PID {targetPid}", targetPid, "error", "Piper timeout — pipe did not respond within 5s. Try 'scheduler' method instead.");
                                                 }
                                             }
-                                            else
+                                            catch (Exception ex)
                                             {
-                                                Debug.WriteLine($"[Execute:Piper] Timeout for PID {targetPid}");
-                                                PushLogToUi($"PID {targetPid}", targetPid, "error", "Piper timeout — pipe did not respond within 5s. Try 'scheduler' method instead.");
+                                                Debug.WriteLine($"[Execute:Piper] Exception PID {targetPid}: {ex.Message}");
+                                                PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper exception: {ex.Message}");
                                             }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            Debug.WriteLine($"[Execute:Piper] Exception PID {targetPid}: {ex.Message}");
-                                            PushLogToUi($"PID {targetPid}", targetPid, "error", $"Piper exception: {ex.Message}");
-                                        }
-                                    });
+                                        });
+                                    }
                                 }
                                 else
                                 {
@@ -777,506 +815,514 @@ end
                         break;
 
                     case "setConsoleRedirect":
-                    {
-                        var crEnabled = root.TryGetProperty("enabled", out var crEn) && crEn.GetBoolean();
-                        _consoleRedirectEnabled = crEnabled;
-                        var redirectPayload = Encoding.UTF8.GetBytes(
-                            $"{{\"type\":\"enableConsoleRedirect\",\"enabled\":{(crEnabled ? "true" : "false")}}}");
-                        foreach (var kv in _wsClients)
                         {
-                            if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
-                            {
-                                try
-                                {
-                                    _ = kv.Value.Socket.SendAsync(
-                                        new ArraySegment<byte>(redirectPayload),
-                                        WebSocketMessageType.Text, true, CancellationToken.None);
-                                }
-                                catch { }
-                            }
-                        }
-                        result = "{\"ok\":true}";
-                        break;
-                    }
+                            var crEnabled = root.TryGetProperty("enabled", out var crEn) && crEn.GetBoolean();
+                            var crMethod = root.TryGetProperty("method", out var crM) ? crM.GetString() ?? "script" : "script";
+                            _consoleRedirectEnabled = crEnabled;
+                            _consoleRedirectMethod = crMethod;
 
-                    case "launchRoblox":
-                    {
-                        try
-                        {
-                            var lnkPath = Path.Combine(
-                                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                                @"Microsoft\Windows\Start Menu\Programs\Roblox\Roblox Player.lnk");
-                            if (File.Exists(lnkPath))
+                            // Build WS payload — Lua handles method routing (hookfunction vs LogService)
+                            string wsPayload;
+                            if (crEnabled)
                             {
-                                Process.Start(new ProcessStartInfo { FileName = lnkPath, UseShellExecute = true });
-                                result = "{\"ok\":true}";
+                                wsPayload = $"{{\"type\":\"enableConsoleRedirect\",\"enabled\":true,\"method\":\"{crMethod}\"}}";
                             }
                             else
                             {
-                                Debug.WriteLine($"[Launch] Roblox shortcut not found: {lnkPath}");
-                                result = "{\"ok\":false,\"error\":\"Roblox shortcut not found\"}";
+                                wsPayload = "{\"type\":\"enableConsoleRedirect\",\"enabled\":false}";
                             }
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"[Launch] Error: {ex.Message}");
-                            result = "{\"ok\":false,\"error\":\"Failed to launch Roblox\"}";
-                        }
-                        break;
-                    }
 
-                    case "setLSPConnect":
-                    {
-                        var lspEnabled = root.TryGetProperty("enabled", out var lspEn) && lspEn.GetBoolean();
-                        _lspConnectEnabled = lspEnabled;
-                        var lspPayload = Encoding.UTF8.GetBytes(
-                            $"{{\"type\":\"enableLSP\",\"enabled\":{(lspEnabled ? "true" : "false")}}}");
-                        foreach (var kv in _wsClients)
-                        {
-                            if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
+                            var payloadBytes = Encoding.UTF8.GetBytes(wsPayload);
+                            foreach (var kv in _wsClients)
                             {
-                                try
+                                if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
                                 {
-                                    _ = kv.Value.Socket!.SendAsync(
-                                        new ArraySegment<byte>(lspPayload),
-                                        WebSocketMessageType.Text, true, CancellationToken.None);
+                                    try { _ = kv.Value.Socket.SendAsync(new ArraySegment<byte>(payloadBytes), WebSocketMessageType.Text, true, CancellationToken.None); } catch { }
                                 }
-                                catch { }
                             }
-                        }
-                        result = "{\"ok\":true}";
-                        break;
-                    }
 
-                    case "setUnlockFPS":
-                    {
-                        var fpsEnabled = root.TryGetProperty("enabled", out var fpsEn) && fpsEn.GetBoolean();
-                        _unlockFPSEnabled = fpsEnabled;
-                        var fpsScript = fpsEnabled ? "setfpscap(math.huge)" : "setfpscap(60)";
-                        var fpsPayload = Encoding.UTF8.GetBytes(
-                            $"{{\"type\":\"execute\",\"code\":\"{fpsScript}\"}}");
-                        foreach (var kv in _wsClients)
-                        {
-                            if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
-                            {
-                                try
-                                {
-                                    _ = kv.Value.Socket.SendAsync(
-                                        new ArraySegment<byte>(fpsPayload),
-                                        WebSocketMessageType.Text, true, CancellationToken.None);
-                                }
-                                catch { }
-                            }
-                        }
-                        result = "{\"ok\":true}";
-                        break;
-                    }
-
-                    case "setTopMost":
-                    {
-                        var topMostEnabled = root.TryGetProperty("enabled", out var tmEn) && tmEn.GetBoolean();
-                        Dispatcher.Invoke(() => { Topmost = topMostEnabled; });
-                        result = "{\"ok\":true}";
-                        break;
-                    }
-
-                    case "queueCommand":
-                    {
-                        var cmd = root.TryGetProperty("command", out var cmdProp) ? cmdProp.GetString() ?? "" : "";
-                        if (!string.IsNullOrEmpty(cmd))
-                        {
-                            // Send command via named pipe to all injected instances
-                            var injected = SynapseZAPI.GetSynzRobloxInstances();
-                            int successCount = 0;
-                            foreach (var proc in injected)
-                            {
-                                var pipeResult = SynapseZAPI.SendPipeCommand(cmd, proc.Id);
-                                if (pipeResult == 0) successCount++;
-                                else Debug.WriteLine($"[QueueCommand] SendPipeCommand failed for PID {proc.Id}: {SynapseZAPI.GetLatestErrorMessage()}");
-                            }
-                            result = $"{{\"ok\":true,\"sent\":{successCount},\"total\":{injected.Count}}}";
-                        }
-                        else
-                        {
-                            result = "{\"ok\":false,\"error\":\"No command specified\"}";
-                        }
-                        break;
-                    }
-
-                    case "getAccountInfo":
-                    {
-                        var hasAccount = !string.IsNullOrEmpty(SynapseZAPI.GetAccountKey());
-                        string expiryStr = "";
-                        if (hasAccount)
-                        {
-                            var expiry = SynapseZAPI.GetExpireDate();
-                            if (expiry.HasValue)
-                                expiryStr = ((DateTimeOffset)expiry.Value).ToUnixTimeSeconds().ToString();
+                            result = "{\"ok\":true}";
+                            break;
                         }
 
-                        // Check if Synapse Z is "down" by checking bin folder and version
-                        var binPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Synapse Z", "bin");
-                        var binExists = Directory.Exists(binPath);
-                        var version = "";
-                        if (binExists)
-                        {
-                            var versionFile = Path.Combine(binPath, "version.txt");
-                            if (File.Exists(versionFile)) version = File.ReadAllText(versionFile).Trim();
-                        }
-                        
-                        var errMsg = SynapseZAPI.GetLatestErrorMessage();
-                        var accKey = SynapseZAPI.GetAccountKey();
-                        result = $"{{\"hasAccount\":{(hasAccount ? "true" : "false")},\"expiry\":\"{expiryStr}\",\"version\":\"{version}\",\"binExists\":{(binExists ? "true" : "false")},\"accountKey\":\"{accKey.Replace("\"", "\\\"")}\",\"error\":\"{errMsg.Replace("\"", "\\\"")}\"}}";
-                        break;
-                    }
-
-                    case "redeemKey":
-                    {
-                        var license = root.TryGetProperty("license", out var licProp) ? licProp.GetString() ?? "" : "";
-                        var redeemResult = SynapseZAPI.Redeem(license);
-                        var redeemErr = SynapseZAPI.GetLatestErrorMessage();
-                        result = $"{{\"code\":{redeemResult},\"error\":\"{redeemErr.Replace("\"", "\\\"")}\"}}";
-                        break;
-                    }
-
-                    case "resetHwid":
-                    {
-                        var hwidResult = SynapseZAPI.ResetHwid();
-                        var hwidErr = SynapseZAPI.GetLatestErrorMessage();
-                        result = $"{{\"code\":{hwidResult},\"error\":\"{hwidErr.Replace("\"", "\\\"")}\"}}";
-                        break;
-                    }
-
-                    case "createAccount":
-                    {
-                        var createLicense = root.TryGetProperty("license", out var clProp) ? clProp.GetString() ?? "" : "";
-                        var accKey = SynapseZAPI.CreateAccount(createLicense);
-                        var createErr = SynapseZAPI.GetLatestErrorMessage();
-                        var isError = accKey.StartsWith("-");
-                        result = $"{{\"ok\":{(!isError ? "true" : "false")},\"error\":\"{createErr.Replace("\"", "\\\"")}\"}}";
-                        break;
-                    }
-
-                    case "ensureDexIcons":
-                    {
-                        var dexIconsDir = Path.Combine(_dataPath, "DexIcons");
-                        if (Directory.Exists(dexIconsDir) && Directory.GetFiles(dexIconsDir, "*.png").Length > 0)
-                        {
-                            result = "{\"ok\":true,\"alreadyExists\":true}";
-                        }
-                        else
+                    case "launchRoblox":
                         {
                             try
                             {
-                                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                                var localZip = Path.Combine(exeDir, "Resources", "ExplorerIcons.zip");
-                                if (!File.Exists(localZip))
+                                var lnkPath = Path.Combine(
+                                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                    @"Microsoft\Windows\Start Menu\Programs\Roblox\Roblox Player.lnk");
+                                if (File.Exists(lnkPath))
                                 {
-                                    result = $"{{\"ok\":false,\"error\":\"ExplorerIcons.zip not found in Resources\"}}";
-                                    break;
+                                    Process.Start(new ProcessStartInfo { FileName = lnkPath, UseShellExecute = true });
+                                    result = "{\"ok\":true}";
                                 }
-                                if (Directory.Exists(dexIconsDir)) Directory.Delete(dexIconsDir, true);
-                                ZipFile.ExtractToDirectory(localZip, dexIconsDir);
-                                result = "{\"ok\":true}";
+                                else
+                                {
+                                    Debug.WriteLine($"[Launch] Roblox shortcut not found: {lnkPath}");
+                                    result = "{\"ok\":false,\"error\":\"Roblox shortcut not found\"}";
+                                }
                             }
                             catch (Exception ex)
                             {
-                                result = $"{{\"ok\":false,\"error\":\"{Esc(ex.Message)}\"}}";
+                                Debug.WriteLine($"[Launch] Error: {ex.Message}");
+                                result = "{\"ok\":false,\"error\":\"Failed to launch Roblox\"}";
                             }
+                            break;
                         }
-                        break;
-                    }
+
+                    case "setLSPConnect":
+                        {
+                            var lspEnabled = root.TryGetProperty("enabled", out var lspEn) && lspEn.GetBoolean();
+                            _lspConnectEnabled = lspEnabled;
+                            var lspPayload = Encoding.UTF8.GetBytes(
+                                $"{{\"type\":\"enableLSP\",\"enabled\":{(lspEnabled ? "true" : "false")}}}");
+                            foreach (var kv in _wsClients)
+                            {
+                                if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
+                                {
+                                    try
+                                    {
+                                        _ = kv.Value.Socket!.SendAsync(
+                                            new ArraySegment<byte>(lspPayload),
+                                            WebSocketMessageType.Text, true, CancellationToken.None);
+                                    }
+                                    catch { }
+                                }
+                            }
+                            result = "{\"ok\":true}";
+                            break;
+                        }
+
+                    case "setUnlockFPS":
+                        {
+                            var fpsEnabled = root.TryGetProperty("enabled", out var fpsEn) && fpsEn.GetBoolean();
+                            _unlockFPSEnabled = fpsEnabled;
+                            var fpsScript = fpsEnabled ? "setfpscap(math.huge)" : "setfpscap(60)";
+                            var fpsPayload = Encoding.UTF8.GetBytes(
+                                $"{{\"type\":\"execute\",\"code\":\"{fpsScript}\"}}");
+                            foreach (var kv in _wsClients)
+                            {
+                                if (kv.Value.Socket != null && kv.Value.Socket.State == WebSocketState.Open)
+                                {
+                                    try
+                                    {
+                                        _ = kv.Value.Socket.SendAsync(
+                                            new ArraySegment<byte>(fpsPayload),
+                                            WebSocketMessageType.Text, true, CancellationToken.None);
+                                    }
+                                    catch { }
+                                }
+                            }
+                            result = "{\"ok\":true}";
+                            break;
+                        }
+
+                    case "setTopMost":
+                        {
+                            var topMostEnabled = root.TryGetProperty("enabled", out var tmEn) && tmEn.GetBoolean();
+                            Dispatcher.Invoke(() => { Topmost = topMostEnabled; });
+                            result = "{\"ok\":true}";
+                            break;
+                        }
+
+                    case "queueCommand":
+                        {
+                            var cmd = root.TryGetProperty("command", out var cmdProp) ? cmdProp.GetString() ?? "" : "";
+                            if (!string.IsNullOrEmpty(cmd))
+                            {
+                                // Send command via named pipe to all injected instances
+                                var injected = SynapseZAPI.GetSynzRobloxInstances();
+                                int successCount = 0;
+                                foreach (var proc in injected)
+                                {
+                                    var pipeResult = SynapseZAPI.SendPipeCommand(cmd, proc.Id);
+                                    if (pipeResult == 0) successCount++;
+                                    else Debug.WriteLine($"[QueueCommand] SendPipeCommand failed for PID {proc.Id}: {SynapseZAPI.GetLatestErrorMessage()}");
+                                }
+                                result = $"{{\"ok\":true,\"sent\":{successCount},\"total\":{injected.Count}}}";
+                            }
+                            else
+                            {
+                                result = "{\"ok\":false,\"error\":\"No command specified\"}";
+                            }
+                            break;
+                        }
+
+                    case "getAccountInfo":
+                        {
+                            var hasAccount = !string.IsNullOrEmpty(SynapseZAPI.GetAccountKey());
+                            string expiryStr = "";
+                            if (hasAccount)
+                            {
+                                var expiry = SynapseZAPI.GetExpireDate();
+                                if (expiry.HasValue)
+                                    expiryStr = ((DateTimeOffset)expiry.Value).ToUnixTimeSeconds().ToString();
+                            }
+
+                            // Check if Synapse Z is "down" by checking bin folder and version
+                            var binPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Synapse Z", "bin");
+                            var binExists = Directory.Exists(binPath);
+                            var version = "";
+                            if (binExists)
+                            {
+                                var versionFile = Path.Combine(binPath, "version.txt");
+                                if (File.Exists(versionFile)) version = File.ReadAllText(versionFile).Trim();
+                            }
+
+                            var errMsg = SynapseZAPI.GetLatestErrorMessage();
+                            var accKey = SynapseZAPI.GetAccountKey();
+                            result = $"{{\"hasAccount\":{(hasAccount ? "true" : "false")},\"expiry\":\"{expiryStr}\",\"version\":\"{version}\",\"binExists\":{(binExists ? "true" : "false")},\"accountKey\":\"{accKey.Replace("\"", "\\\"")}\",\"error\":\"{errMsg.Replace("\"", "\\\"")}\"}}";
+                            break;
+                        }
+
+                    case "redeemKey":
+                        {
+                            var license = root.TryGetProperty("license", out var licProp) ? licProp.GetString() ?? "" : "";
+                            var redeemResult = SynapseZAPI.Redeem(license);
+                            var redeemErr = SynapseZAPI.GetLatestErrorMessage();
+                            result = $"{{\"code\":{redeemResult},\"error\":\"{redeemErr.Replace("\"", "\\\"")}\"}}";
+                            break;
+                        }
+
+                    case "resetHwid":
+                        {
+                            var hwidResult = SynapseZAPI.ResetHwid();
+                            var hwidErr = SynapseZAPI.GetLatestErrorMessage();
+                            result = $"{{\"code\":{hwidResult},\"error\":\"{hwidErr.Replace("\"", "\\\"")}\"}}";
+                            break;
+                        }
+
+                    case "createAccount":
+                        {
+                            var createLicense = root.TryGetProperty("license", out var clProp) ? clProp.GetString() ?? "" : "";
+                            var accKey = SynapseZAPI.CreateAccount(createLicense);
+                            var createErr = SynapseZAPI.GetLatestErrorMessage();
+                            var isError = accKey.StartsWith("-");
+                            result = $"{{\"ok\":{(!isError ? "true" : "false")},\"error\":\"{createErr.Replace("\"", "\\\"")}\"}}";
+                            break;
+                        }
+
+                    case "ensureDexIcons":
+                        {
+                            var dexIconsDir = Path.Combine(_dataPath, "DexIcons");
+                            if (Directory.Exists(dexIconsDir) && Directory.GetFiles(dexIconsDir, "*.png").Length > 0)
+                            {
+                                result = "{\"ok\":true,\"alreadyExists\":true}";
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                                    var localZip = Path.Combine(exeDir, "Resources", "ExplorerIcons.zip");
+                                    if (!File.Exists(localZip))
+                                    {
+                                        result = $"{{\"ok\":false,\"error\":\"ExplorerIcons.zip not found in Resources\"}}";
+                                        break;
+                                    }
+                                    if (Directory.Exists(dexIconsDir)) Directory.Delete(dexIconsDir, true);
+                                    ZipFile.ExtractToDirectory(localZip, dexIconsDir);
+                                    result = "{\"ok\":true}";
+                                }
+                                catch (Exception ex)
+                                {
+                                    result = $"{{\"ok\":false,\"error\":\"{Esc(ex.Message)}\"}}";
+                                }
+                            }
+                            break;
+                        }
 
                     case "getDexIcons":
-                    {
-                        var iconsDir = Path.Combine(_dataPath, "DexIcons");
-                        if (!Directory.Exists(iconsDir))
                         {
-                            result = "{\"ok\":false,\"error\":\"DexIcons folder not found\"}";
-                        }
-                        else
-                        {
-                            var sb2 = new StringBuilder("{\"ok\":true,\"icons\":{");
-                            bool first2 = true;
-                            // Search recursively for PNG files
-                            foreach (var file in Directory.GetFiles(iconsDir, "*.png", SearchOption.AllDirectories))
+                            var iconsDir = Path.Combine(_dataPath, "DexIcons");
+                            if (!Directory.Exists(iconsDir))
                             {
-                                var className = Path.GetFileNameWithoutExtension(file);
-                                var b64 = Convert.ToBase64String(File.ReadAllBytes(file));
-                                if (!first2) sb2.Append(',');
-                                first2 = false;
-                                sb2.Append($"\"{Esc(className)}\":\"data:image/png;base64,{b64}\"");
+                                result = "{\"ok\":false,\"error\":\"DexIcons folder not found\"}";
                             }
-                            sb2.Append("}}");
-                            result = sb2.ToString();
+                            else
+                            {
+                                var sb2 = new StringBuilder("{\"ok\":true,\"icons\":{");
+                                bool first2 = true;
+                                // Search recursively for PNG files
+                                foreach (var file in Directory.GetFiles(iconsDir, "*.png", SearchOption.AllDirectories))
+                                {
+                                    var className = Path.GetFileNameWithoutExtension(file);
+                                    var b64 = Convert.ToBase64String(File.ReadAllBytes(file));
+                                    if (!first2) sb2.Append(',');
+                                    first2 = false;
+                                    sb2.Append($"\"{Esc(className)}\":\"data:image/png;base64,{b64}\"");
+                                }
+                                sb2.Append("}}");
+                                result = sb2.ToString();
+                            }
+                            break;
                         }
-                        break;
-                    }
 
                     case "sendDexMessage":
-                    {
-                        var dexPid = root.TryGetProperty("pid", out var dexPidProp) ? dexPidProp.GetInt32() : 0;
-                        var dexMsg = root.TryGetProperty("message", out var dexMsgProp) ? dexMsgProp.GetRawText() : "{}";
-                        if (dexPid > 0)
                         {
-                            var target = _wsClients.Values.FirstOrDefault(c => c.Pid == dexPid && c.Socket != null && c.Socket.State == WebSocketState.Open);
-                            if (target != null)
+                            var dexPid = root.TryGetProperty("pid", out var dexPidProp) ? dexPidProp.GetInt32() : 0;
+                            var dexMsg = root.TryGetProperty("message", out var dexMsgProp) ? dexMsgProp.GetRawText() : "{}";
+                            if (dexPid > 0)
                             {
-                                var msgBytes = Encoding.UTF8.GetBytes(dexMsg);
-                                await target.Socket!.SendAsync(new ArraySegment<byte>(msgBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                                var target = _wsClients.Values.FirstOrDefault(c => c.Pid == dexPid && c.Socket != null && c.Socket.State == WebSocketState.Open);
+                                if (target != null)
+                                {
+                                    var msgBytes = Encoding.UTF8.GetBytes(dexMsg);
+                                    await target.Socket!.SendAsync(new ArraySegment<byte>(msgBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                                    result = "{\"ok\":true}";
+                                }
+                                else
+                                {
+                                    result = "{\"ok\":false,\"error\":\"Client not connected\"}";
+                                }
+                            }
+                            else
+                            {
+                                result = "{\"ok\":false,\"error\":\"Invalid PID\"}";
+                            }
+                            break;
+                        }
+
+                    case "openUrl":
+                        {
+                            var url = root.TryGetProperty("url", out var urlProp) ? urlProp.GetString() ?? "" : "";
+                            if (!string.IsNullOrEmpty(url))
+                            {
+                                Process.Start(new ProcessStartInfo("cmd", $"/c start \"\" \"{url}\"")
+                                { CreateNoWindow = true, UseShellExecute = false });
                                 result = "{\"ok\":true}";
                             }
                             else
                             {
-                                result = "{\"ok\":false,\"error\":\"Client not connected\"}";
+                                result = "{\"ok\":false,\"error\":\"No URL specified\"}";
                             }
+                            break;
                         }
-                        else
-                        {
-                            result = "{\"ok\":false,\"error\":\"Invalid PID\"}";
-                        }
-                        break;
-                    }
-
-                    case "openUrl":
-                    {
-                        var url = root.TryGetProperty("url", out var urlProp) ? urlProp.GetString() ?? "" : "";
-                        if (!string.IsNullOrEmpty(url))
-                        {
-                            Process.Start(new ProcessStartInfo("cmd", $"/c start \"\" \"{url}\"")
-                            { CreateNoWindow = true, UseShellExecute = false });
-                            result = "{\"ok\":true}";
-                        }
-                        else
-                        {
-                            result = "{\"ok\":false,\"error\":\"No URL specified\"}";
-                        }
-                        break;
-                    }
 
                     case "openMonitor":
-                    {
-                        var capPid = root.TryGetProperty("pid", out var capPidProp) ? capPidProp.GetInt32() : 0;
-                        var capUser = root.TryGetProperty("username", out var capUserProp) ? capUserProp.GetString() : "Unknown";
-                        if (capPid > 0)
                         {
-                            try
+                            var capPid = root.TryGetProperty("pid", out var capPidProp) ? capPidProp.GetInt32() : 0;
+                            var capUser = root.TryGetProperty("username", out var capUserProp) ? capUserProp.GetString() : "Unknown";
+                            if (capPid > 0)
                             {
-                                string? monitorError = null;
+                                try
+                                {
+                                    string? monitorError = null;
+                                    Dispatcher.Invoke(() =>
+                                    {
+                                        try
+                                        {
+                                            // Close existing monitor for this PID
+                                            if (_monitorWindows.TryGetValue(capPid, out var existing))
+                                            {
+                                                try { existing.Close(); } catch { }
+                                                _monitorWindows.Remove(capPid);
+                                            }
+
+                                            Process capProc;
+                                            try { capProc = Process.GetProcessById(capPid); }
+                                            catch { monitorError = "Process not found"; return; }
+
+                                            var hWnd = capProc.MainWindowHandle;
+                                            if (hWnd == IntPtr.Zero)
+                                            {
+                                                monitorError = "No window handle found";
+                                                return;
+                                            }
+
+                                            var monWin = new MonitorWindow(capPid, capUser ?? "Unknown", hWnd);
+                                            monWin.Closed += (_, _) => _monitorWindows.Remove(capPid);
+                                            _monitorWindows[capPid] = monWin;
+                                            monWin.Show();
+                                        }
+                                        catch (Exception uiEx)
+                                        {
+                                            monitorError = uiEx.Message;
+                                        }
+                                    });
+                                    result = monitorError == null
+                                        ? "{\"ok\":true}"
+                                        : System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = monitorError });
+                                }
+                                catch (Exception ex)
+                                {
+                                    result = System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = ex.Message });
+                                }
+                            }
+                            else
+                                result = "{\"ok\":false,\"error\":\"invalid pid\"}";
+                            break;
+                        }
+
+                    case "openDexExplorer":
+                        {
+                            var dexExpPid = root.TryGetProperty("pid", out var dexExpPidProp) ? dexExpPidProp.GetInt32() : 0;
+                            var dexExpUser = root.TryGetProperty("username", out var dexExpUserProp) ? dexExpUserProp.GetString() ?? "Unknown" : "Unknown";
+                            if (dexExpPid > 0)
+                            {
+                                string? dexError = null;
                                 Dispatcher.Invoke(() =>
                                 {
                                     try
                                     {
-                                        // Close existing monitor for this PID
-                                        if (_monitorWindows.TryGetValue(capPid, out var existing))
+                                        // Close existing DEX for this PID
+                                        if (_dexWindows.TryGetValue(dexExpPid, out var existing))
                                         {
                                             try { existing.Close(); } catch { }
-                                            _monitorWindows.Remove(capPid);
+                                            _dexWindows.Remove(dexExpPid);
                                         }
 
-                                        Process capProc;
-                                        try { capProc = Process.GetProcessById(capPid); }
-                                        catch { monitorError = "Process not found"; return; }
-
-                                        var hWnd = capProc.MainWindowHandle;
-                                        if (hWnd == IntPtr.Zero)
-                                        {
-                                            monitorError = "No window handle found";
-                                            return;
-                                        }
-
-                                        var monWin = new MonitorWindow(capPid, capUser ?? "Unknown", hWnd);
-                                        monWin.Closed += (_, _) => _monitorWindows.Remove(capPid);
-                                        _monitorWindows[capPid] = monWin;
-                                        monWin.Show();
+                                        var dexWin = new DexWindow(dexExpPid, dexExpUser, ServerUrl, _dataPath);
+                                        dexWin.Closed += (_, _) => _dexWindows.Remove(dexExpPid);
+                                        _dexWindows[dexExpPid] = dexWin;
+                                        dexWin.Show();
                                     }
                                     catch (Exception uiEx)
                                     {
-                                        monitorError = uiEx.Message;
+                                        dexError = uiEx.Message;
                                     }
                                 });
-                                result = monitorError == null
+                                result = dexError == null
                                     ? "{\"ok\":true}"
-                                    : System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = monitorError });
+                                    : JsonSerializer.Serialize(new { ok = false, error = dexError });
                             }
-                            catch (Exception ex)
+                            else
                             {
-                                result = System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = ex.Message });
+                                result = "{\"ok\":false,\"error\":\"Invalid PID\"}";
                             }
+                            break;
                         }
-                        else
-                            result = "{\"ok\":false,\"error\":\"invalid pid\"}";
-                        break;
-                    }
-
-                    case "openDexExplorer":
-                    {
-                        var dexExpPid = root.TryGetProperty("pid", out var dexExpPidProp) ? dexExpPidProp.GetInt32() : 0;
-                        var dexExpUser = root.TryGetProperty("username", out var dexExpUserProp) ? dexExpUserProp.GetString() ?? "Unknown" : "Unknown";
-                        if (dexExpPid > 0)
-                        {
-                            string? dexError = null;
-                            Dispatcher.Invoke(() =>
-                            {
-                                try
-                                {
-                                    // Close existing DEX for this PID
-                                    if (_dexWindows.TryGetValue(dexExpPid, out var existing))
-                                    {
-                                        try { existing.Close(); } catch { }
-                                        _dexWindows.Remove(dexExpPid);
-                                    }
-
-                                    var dexWin = new DexWindow(dexExpPid, dexExpUser, ServerUrl, _dataPath);
-                                    dexWin.Closed += (_, _) => _dexWindows.Remove(dexExpPid);
-                                    _dexWindows[dexExpPid] = dexWin;
-                                    dexWin.Show();
-                                }
-                                catch (Exception uiEx)
-                                {
-                                    dexError = uiEx.Message;
-                                }
-                            });
-                            result = dexError == null
-                                ? "{\"ok\":true}"
-                                : JsonSerializer.Serialize(new { ok = false, error = dexError });
-                        }
-                        else
-                        {
-                            result = "{\"ok\":false,\"error\":\"Invalid PID\"}";
-                        }
-                        break;
-                    }
 
                     case "openConsoleWindow":
-                    {
-                        var linesJson = root.TryGetProperty("lines", out var linesProp) ? linesProp.GetString() ?? "[]" : "[]";
-                        Dispatcher.Invoke(() =>
                         {
-                            try
-                            {
-                                // Close existing if any
-                                if (_consoleWindow != null)
-                                {
-                                    try { _consoleWindow.Close(); } catch { }
-                                    _consoleWindow = null;
-                                }
-
-                                _consoleWindow = new ConsoleWindow(ServerUrl);
-                                _consoleWindow.ConsoleClosed += () =>
-                                {
-                                    _consoleWindow = null;
-                                    // Notify the main WebView to re-dock the console
-                                    Dispatcher.InvokeAsync(async () =>
-                                    {
-                                        try
-                                        {
-                                            await WebView.CoreWebView2.ExecuteScriptAsync(
-                                                "if (typeof window.__consoleWindowClosed === 'function') window.__consoleWindowClosed();");
-                                        }
-                                        catch { }
-                                    });
-                                };
-                                _consoleWindow.Show();
-
-                                // Send existing lines after a short delay (WebView2 needs to load)
-                                var lines = linesJson;
-                                Task.Run(async () =>
-                                {
-                                    await Task.Delay(1500);
-                                    Dispatcher.Invoke(() => _consoleWindow?.SendAllLines(lines));
-                                });
-                            }
-                            catch { }
-                        });
-                        result = "{\"ok\":true}";
-                        break;
-                    }
-
-                    case "forwardConsoleLine":
-                    {
-                        var lineJson = root.TryGetProperty("line", out var lineProp) ? lineProp.GetString() ?? "" : "";
-                        if (_consoleWindow != null && !string.IsNullOrEmpty(lineJson))
-                        {
-                            _consoleWindow.SendConsoleLine(lineJson);
-                        }
-                        result = "{\"ok\":true}";
-                        break;
-                    }
-
-                    case "clearConsoleWindow":
-                    {
-                        _consoleWindow?.ClearConsole();
-                        result = "{\"ok\":true}";
-                        break;
-                    }
-
-                    case "setWindowTitle":
-                    {
-
-                        var titlePid = root.TryGetProperty("pid", out var titlePidProp) ? titlePidProp.GetInt32() : 0;
-                        var newTitle = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : "";
-                        if (titlePid > 0 && !string.IsNullOrEmpty(newTitle))
-                        {
-                            try
-                            {
-                                var titleProc = Process.GetProcessById(titlePid);
-                                var titleHwnd = titleProc.MainWindowHandle;
-                                if (titleHwnd != IntPtr.Zero)
-                                {
-                                    SetWindowText(titleHwnd, newTitle);
-                                    result = "{\"ok\":true}";
-                                }
-                                else
-                                    result = "{\"ok\":false,\"error\":\"no window handle\"}";
-                            }
-                            catch (Exception ex)
-                            {
-                                result = System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = ex.Message });
-                            }
-                        }
-                        else
-                            result = "{\"ok\":false,\"error\":\"invalid pid or title\"}";
-                        break;
-                    }
-
-                    case "showJoinNotification":
-                    {
-                        var notifDisplayName = root.TryGetProperty("displayName", out var ndnP) ? ndnP.GetString() ?? "" : "";
-                        var notifUsername = root.TryGetProperty("username", out var nunP) ? nunP.GetString() ?? "" : "";
-                        var notifAvatarUrl = root.TryGetProperty("avatarUrl", out var naP) ? naP.GetString() ?? "" : "";
-                        var notifJobId = root.TryGetProperty("jobId", out var njP) ? njP.GetString() ?? "" : "";
-                        var notifDuration = root.TryGetProperty("duration", out var ndP) ? ndP.GetInt32() : 5;
-                        var notifRobloxPid = root.TryGetProperty("robloxPid", out var nppP) ? nppP.GetInt32() : 0;
-                        var notifUserId = root.TryGetProperty("userId", out var nuiP) ? nuiP.GetInt64() : 0;
-
-                        if (notifRobloxPid > 0)
-                        {
+                            var linesJson = root.TryGetProperty("lines", out var linesProp) ? linesProp.GetString() ?? "[]" : "[]";
                             Dispatcher.Invoke(() =>
                             {
                                 try
                                 {
-                                    // Close previous notification to avoid stacking
-                                    try { _activeNotification?.Close(); } catch { }
-                                    _activeNotification = null;
+                                    // Close existing if any
+                                    if (_consoleWindow != null)
+                                    {
+                                        try { _consoleWindow.Close(); } catch { }
+                                        _consoleWindow = null;
+                                    }
 
-                                    var notif = new NotificationWindow(
-                                        notifDisplayName, notifUsername, notifAvatarUrl,
-                                        notifJobId, notifRobloxPid, notifDuration,
-                                        notifUserId);
-                                    notif.Closed += (_, _) => { if (_activeNotification == notif) _activeNotification = null; };
-                                    _activeNotification = notif;
-                                    notif.Show();
+                                    _consoleWindow = new ConsoleWindow(ServerUrl);
+                                    _consoleWindow.ConsoleClosed += () =>
+                                    {
+                                        _consoleWindow = null;
+                                        // Notify the main WebView to re-dock the console
+                                        Dispatcher.InvokeAsync(async () =>
+                                        {
+                                            try
+                                            {
+                                                await WebView.CoreWebView2.ExecuteScriptAsync(
+                                                    "if (typeof window.__consoleWindowClosed === 'function') window.__consoleWindowClosed();");
+                                            }
+                                            catch { }
+                                        });
+                                    };
+                                    _consoleWindow.Show();
+
+                                    // Send existing lines after a short delay (WebView2 needs to load)
+                                    var lines = linesJson;
+                                    Task.Run(async () =>
+                                    {
+                                        await Task.Delay(1500);
+                                        Dispatcher.Invoke(() => _consoleWindow?.SendAllLines(lines));
+                                    });
+                                }
+                                catch { }
+                            });
+                            result = "{\"ok\":true}";
+                            break;
+                        }
+
+                    case "forwardConsoleLine":
+                        {
+                            var lineJson = root.TryGetProperty("line", out var lineProp) ? lineProp.GetString() ?? "" : "";
+                            if (_consoleWindow != null && !string.IsNullOrEmpty(lineJson))
+                            {
+                                _consoleWindow.SendConsoleLine(lineJson);
+                            }
+                            result = "{\"ok\":true}";
+                            break;
+                        }
+
+                    case "clearConsoleWindow":
+                        {
+                            _consoleWindow?.ClearConsole();
+                            result = "{\"ok\":true}";
+                            break;
+                        }
+
+                    case "setWindowTitle":
+                        {
+
+                            var titlePid = root.TryGetProperty("pid", out var titlePidProp) ? titlePidProp.GetInt32() : 0;
+                            var newTitle = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : "";
+                            if (titlePid > 0 && !string.IsNullOrEmpty(newTitle))
+                            {
+                                try
+                                {
+                                    var titleProc = Process.GetProcessById(titlePid);
+                                    var titleHwnd = titleProc.MainWindowHandle;
+                                    if (titleHwnd != IntPtr.Zero)
+                                    {
+                                        SetWindowText(titleHwnd, newTitle);
+                                        result = "{\"ok\":true}";
+                                    }
+                                    else
+                                        result = "{\"ok\":false,\"error\":\"no window handle\"}";
                                 }
                                 catch (Exception ex)
                                 {
-                                    Debug.WriteLine($"[Notif] Error showing notification: {ex.Message}");
+                                    result = System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = ex.Message });
                                 }
-                            });
+                            }
+                            else
+                                result = "{\"ok\":false,\"error\":\"invalid pid or title\"}";
+                            break;
                         }
-                        result = "{\"ok\":true}";
-                        break;
-                    }
+
+                    case "showJoinNotification":
+                        {
+                            var notifDisplayName = root.TryGetProperty("displayName", out var ndnP) ? ndnP.GetString() ?? "" : "";
+                            var notifUsername = root.TryGetProperty("username", out var nunP) ? nunP.GetString() ?? "" : "";
+                            var notifAvatarUrl = root.TryGetProperty("avatarUrl", out var naP) ? naP.GetString() ?? "" : "";
+                            var notifJobId = root.TryGetProperty("jobId", out var njP) ? njP.GetString() ?? "" : "";
+                            var notifDuration = root.TryGetProperty("duration", out var ndP) ? ndP.GetInt32() : 5;
+                            var notifRobloxPid = root.TryGetProperty("robloxPid", out var nppP) ? nppP.GetInt32() : 0;
+                            var notifUserId = root.TryGetProperty("userId", out var nuiP) ? nuiP.GetInt64() : 0;
+
+                            if (notifRobloxPid > 0)
+                            {
+                                Dispatcher.Invoke(() =>
+                                {
+                                    try
+                                    {
+                                        // Close previous notification to avoid stacking
+                                        try { _activeNotification?.Close(); } catch { }
+                                        _activeNotification = null;
+
+                                        var notif = new NotificationWindow(
+                                            notifDisplayName, notifUsername, notifAvatarUrl,
+                                            notifJobId, notifRobloxPid, notifDuration,
+                                            notifUserId);
+                                        notif.Closed += (_, _) => { if (_activeNotification == notif) _activeNotification = null; };
+                                        _activeNotification = notif;
+                                        notif.Show();
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Debug.WriteLine($"[Notif] Error showing notification: {ex.Message}");
+                                    }
+                                });
+                            }
+                            result = "{\"ok\":true}";
+                            break;
+                        }
                 }
 
                 var response = $"{{\"requestId\":\"{requestId}\",\"data\":{result}}}";
@@ -1302,8 +1348,8 @@ end
                 await Dispatcher.InvokeAsync(async () =>
                     await WebView.CoreWebView2.ExecuteScriptAsync(jsCode));
             }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] ERROR: {ex.Message}\n{ex.StackTrace}\n");
             }
         };
@@ -1548,7 +1594,8 @@ end
                     await Task.Delay(500, ct);
                     if (_consoleRedirectEnabled)
                     {
-                        var crMsg = Encoding.UTF8.GetBytes("{\"type\":\"enableConsoleRedirect\",\"enabled\":true}");
+                        var crMsg = Encoding.UTF8.GetBytes(
+                            $"{{\"type\":\"enableConsoleRedirect\",\"enabled\":true,\"method\":\"{_consoleRedirectMethod}\"}}");
                         await ws.SendAsync(new ArraySegment<byte>(crMsg), WebSocketMessageType.Text, true, ct);
                     }
                     if (_lspConnectEnabled)
@@ -1820,14 +1867,14 @@ end
     private void PushDexToUi(int pid, string rawJson)
     {
         var jsPayload = System.Text.Json.JsonSerializer.Serialize(rawJson);
-        
+
         Dispatcher.InvokeAsync(async () =>
         {
             try
             {
                 // Send to the DEX window for this PID
                 var hasDexWin = _dexWindows.TryGetValue(pid, out var dexWin);
-                
+
                 if (hasDexWin && dexWin?.DexWebView?.CoreWebView2 != null)
                 {
                     // Intercept decompile/dump results — route to ScriptViewerWindow
@@ -1839,7 +1886,7 @@ end
                     var js = $"typeof window.__onDexData === 'function' && window.__onDexData({pid},{jsPayload})";
                     await dexWin.DexWebView.CoreWebView2.ExecuteScriptAsync(js);
                 }
-                
+
 
             }
             catch { }
@@ -1972,7 +2019,7 @@ end
                 var pid = proc.Id;
                 // Skip if we already have a live WS connection from this PID
                 if (wsConnectedPids.Contains(pid)) continue;
-                
+
                 var isSynz = SynapseZAPI.IsSynz(pid);
                 var logLine = $"[Poll] PID {pid}: IsSynz={isSynz}, alreadyInjected={_injectedPids.Contains(pid)}, wsConnected={wsConnectedPids.Contains(pid)}";
                 Debug.WriteLine(logLine);

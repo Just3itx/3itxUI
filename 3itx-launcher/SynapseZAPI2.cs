@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -109,24 +110,35 @@ public class SynapseZAPI2
 
         private void ConsoleOutput__internal(string command, string data, int i)
         {
-            if (command != "read") return;
-
-            char[] separator = " ".ToCharArray();
-            string[] splitted = data.Split(separator, count: 2, StringSplitOptions.None);
-            command = splitted[0];
-            data = splitted[1];
-
-            if (command == "output")
+            if (command != "read" || data == null) return;
+            Debug.WriteLine($"[API2:Console] PID {Pid} raw data: cmd={command} data='{data}'");
+            try
             {
-                string[] splitted2 = data.Split(separator, count: 2, StringSplitOptions.None);
-                int type = int.Parse(splitted2[0]);
-                string output = splitted2[1];
+                char[] separator = " ".ToCharArray();
+                string[] splitted = data.Split(separator, count: 2, StringSplitOptions.None);
+                if (splitted.Length < 2) return;
+                command = splitted[0];
+                data = splitted[1];
 
-                SessionOutput?.Invoke(this, type, output);
+                if (command == "output")
+                {
+                    string[] splitted2 = data.Split(separator, count: 2, StringSplitOptions.None);
+                    if (splitted2.Length < 2) return;
+                    if (!int.TryParse(splitted2[0], out int type)) return;
+                    string output = splitted2[1];
+
+                    Debug.WriteLine($"[API2:Console] PID {Pid} FIRING SessionOutput: type={type} msg='{output}'");
+                    SessionOutput?.Invoke(this, type, output ?? "");
+                }
+                else if (command == "error")
+                {
+                    Debug.WriteLine($"[API2:Console] PID {Pid} FIRING SessionOutput ERROR: msg='{data}'");
+                    SessionOutput?.Invoke(this, 3, data ?? "");
+                }
             }
-            else if (command == "error")
+            catch (Exception ex)
             {
-                SessionOutput?.Invoke(this, 3, data);
+                Debug.WriteLine($"[SynapseZAPI2] ConsoleOutput parse error: {ex.Message}");
             }
         }
 
@@ -138,59 +150,102 @@ public class SynapseZAPI2
             }, null);
         }
 
+
         public bool Init(uint pid)
         {
             Pid = pid;
             string initialPipe = $@"\\.\pipe\synz-{pid}";
+            Debug.WriteLine($"[API2:Init] Trying Win32 pipe: {initialPipe}");
 
-            if (!WaitNamedPipe(initialPipe, 10))
+            // Retry loop for WaitNamedPipe + CreateFile
+            SafeFileHandle handle = null;
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                if (WaitNamedPipe(initialPipe, 1000))
+                {
+                    handle = CreateFile(initialPipe, GENERIC_READ | GENERIC_WRITE,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+                    if (!handle.IsInvalid) break;
+                    handle = null;
+                }
+                Thread.Sleep(200);
+            }
+
+            if (handle == null || handle.IsInvalid)
+            {
+                Debug.WriteLine($"[API2:Init] Failed to connect to pipe for PID {pid}");
                 return false;
-
-            SafeFileHandle handle = CreateFile(initialPipe, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
-
-            if (handle.IsInvalid) return false;
+            }
 
             uint mode = PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE;
             SetNamedPipeHandleState(handle, ref mode, IntPtr.Zero, IntPtr.Zero);
 
+            // Send "new" command — exact reference protocol
             byte[] newCmd = Encoding.UTF8.GetBytes("new");
             WriteFile(handle, newCmd, (uint)newCmd.Length, out _, IntPtr.Zero);
+
+            // Zero-byte ReadFile sync (critical — signals server to prepare session)
             ReadFile(handle, null, 0, out _, IntPtr.Zero);
 
+            // Retry PeekNamedPipe to handle race condition
             uint totalBytesAvail = 0;
-            if (PeekNamedPipe(handle, null, 0, IntPtr.Zero, out totalBytesAvail, IntPtr.Zero) && totalBytesAvail > 0)
+            for (int retry = 0; retry < 20; retry++)
+            {
+                if (PeekNamedPipe(handle, null, 0, IntPtr.Zero, out totalBytesAvail, IntPtr.Zero) && totalBytesAvail > 0)
+                    break;
+                Thread.Sleep(50);
+            }
+
+            if (totalBytesAvail > 0)
             {
                 byte[] responseBuffer = new byte[totalBytesAvail];
                 ReadFile(handle, responseBuffer, totalBytesAvail, out _, IntPtr.Zero);
                 PipeName = Encoding.UTF8.GetString(responseBuffer);
 
+                // Ensure full path for Win32 APIs
+                if (!PipeName.StartsWith(@"\\"))
+                    PipeName = $@"\\.\pipe\{PipeName}";
+
+                Debug.WriteLine($"[API2:Init] Handshake OK for PID {pid}, session pipe: {PipeName}");
+
+                handle.Close();
+
                 Thread runner = new Thread(SessionLoop);
                 runner.IsBackground = true;
                 runner.Start();
 
-                handle.Close();
                 return true;
             }
 
+            Debug.WriteLine($"[API2:Init] PeekNamedPipe returned 0 bytes after retries for PID {pid}");
             handle.Close();
             return false;
         }
 
         private void SessionLoop()
         {
+            Debug.WriteLine($"[API2:SessionLoop] Starting for PID {Pid}, pipe: '{PipeName}'");
             try
             {
                 while (true)
                 {
-                    if (!WaitNamedPipe(PipeName, -1))
+                    if (!WaitNamedPipe(PipeName, 5000))
+                    {
+                        Thread.Sleep(500);
                         continue;
+                    }
 
                     using SafeFileHandle pipe = CreateFile(PipeName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
 
-                    if (pipe.IsInvalid) continue;
+                    if (pipe.IsInvalid)
+                    {
+                        Thread.Sleep(500);
+                        continue;
+                    }
 
                     uint mode = PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE;
                     SetNamedPipeHandleState(pipe, ref mode, IntPtr.Zero, IntPtr.Zero);
+                    Debug.WriteLine($"[API2:SessionLoop] Connected to session pipe for PID {Pid}");
 
                     while (true)
                     {
@@ -208,43 +263,36 @@ public class SynapseZAPI2
                         byte[] encodedBytes = Encoding.UTF8.GetBytes(encoded);
 
                         if (!WriteFile(pipe, encodedBytes, (uint)encodedBytes.Length, out _, IntPtr.Zero))
-                        {
-                            return;
-                        }
+                            break;
 
                         foreach (var cmd in commandQueue)
                         {
                             byte[] cmdBytes = Encoding.UTF8.GetBytes(cmd);
-                            WriteFile(pipe, cmdBytes, (uint)cmdBytes.Length, out _, IntPtr.Zero);
-                            ReadFile(pipe, null, 0, out _, IntPtr.Zero);
+                            if (!WriteFile(pipe, cmdBytes, (uint)cmdBytes.Length, out _, IntPtr.Zero))
+                                break;
 
-                            uint size = 0;
-                            if (PeekNamedPipe(pipe, null, 0, IntPtr.Zero, out size, IntPtr.Zero))
+                            // Blocking read for response count
+                            byte[] countBuf = new byte[65536];
+                            if (!ReadFile(pipe, countBuf, (uint)countBuf.Length, out uint countBytesRead, IntPtr.Zero))
+                                break;
+
+                            string countStr = Encoding.UTF8.GetString(countBuf, 0, (int)countBytesRead);
+
+                            if (ulong.TryParse(countStr, out ulong numResponses))
                             {
-                                byte[] tempBuffer = new byte[size];
-                                ReadFile(pipe, tempBuffer, size, out _, IntPtr.Zero);
-                                string tempStr = Encoding.UTF8.GetString(tempBuffer);
-
-                                if (ulong.TryParse(tempStr, out ulong numResponses))
+                                for (int i = 0; i < (int)numResponses; i++)
                                 {
-                                    for (int i = 0; i < (int)numResponses; i++)
+                                    byte[] dataBuf = new byte[65536];
+                                    if (!ReadFile(pipe, dataBuf, (uint)dataBuf.Length, out uint dataBytesRead, IntPtr.Zero))
+                                        break;
+
+                                    string data = Encoding.UTF8.GetString(dataBuf, 0, (int)dataBytesRead);
+
+                                    lock (_cycleLock)
                                     {
-                                        uint dataSize = 0;
-
-                                        ReadFile(pipe, null, 0, out _, IntPtr.Zero);
-                                        if (!PeekNamedPipe(pipe, null, 0, IntPtr.Zero, out dataSize, IntPtr.Zero))
-                                            break;
-
-                                        byte[] dataBuffer = new byte[dataSize];
-                                        ReadFile(pipe, dataBuffer, dataSize, out _, IntPtr.Zero);
-                                        string data = Encoding.UTF8.GetString(dataBuffer);
-
-                                        lock (_cycleLock)
+                                        foreach (var callback in _onMessageCallbacks)
                                         {
-                                            foreach (var callback in _onMessageCallbacks)
-                                            {
-                                                callback(cmd, data, i);
-                                            }
+                                            callback(cmd, data, i);
                                         }
                                     }
                                 }
@@ -257,6 +305,7 @@ public class SynapseZAPI2
             }
             finally
             {
+                Debug.WriteLine($"[API2:SessionLoop] Exiting for PID {Pid}");
                 RemoveSession(Pid);
             }
         }
@@ -280,37 +329,55 @@ public class SynapseZAPI2
         Debug.WriteLine("[SynapseZAPI2] Instances timer stopped");
     }
 
+    // Track PIDs that failed Init to avoid retrying every 2s (non-injected processes)
+    private static readonly ConcurrentDictionary<uint, DateTime> _failedPids = new();
+
     private static void InstancesTimerTick(object? source, ElapsedEventArgs e)
     {
         try
         {
             Process[] processes = Process.GetProcessesByName("RobloxPlayerBeta");
+            Debug.WriteLine($"[API2:Tick] Found {processes.Length} RobloxPlayerBeta process(es), {Sessions.Count} active session(s), {_failedPids.Count} failed PID(s)");
 
             for (int i = 0; i < processes.Length; i++)
             {
                 Process process = processes[i];
                 if (process == null) continue;
 
-                if (Sessions.ContainsKey((uint)process.Id)) continue;
+                uint pid = (uint)process.Id;
+                if (Sessions.ContainsKey(pid)) continue;
 
-                if (!SynapseZAPI.IsSynz(process.Id)) continue;
-
-                // Add new instance
-                SynapseSession session = new SynapseSession();
-                Sessions.TryAdd((uint)process.Id, session);
-
-                Debug.WriteLine($"[SynapseZAPI2] New session detected for PID {process.Id}, initializing pipe...");
-
-                if (session.Init((uint)process.Id))
+                // Skip PIDs that recently failed Init (cooldown: 10s)
+                if (_failedPids.TryGetValue(pid, out var lastFail) && (DateTime.UtcNow - lastFail).TotalSeconds < 10)
                 {
-                    Debug.WriteLine($"[SynapseZAPI2] Session initialized for PID {process.Id}, pipe: {session.PipeName}");
+                    continue;
+                }
+
+                Debug.WriteLine($"[API2:Tick] Attempting Init for PID {pid}...");
+
+                // Try to connect directly — Init returns false if pipe doesn't exist
+                SynapseSession session = new SynapseSession();
+                Sessions.TryAdd(pid, session);
+
+                if (session.Init(pid))
+                {
+                    _failedPids.TryRemove(pid, out _);
+                    Debug.WriteLine($"[API2:Tick] ✓ Session initialized for PID {pid}, pipe: {session.PipeName}");
                     SessionAdded?.Invoke(session);
                 }
                 else
                 {
-                    Debug.WriteLine($"[SynapseZAPI2] Failed to initialize session for PID {process.Id}");
-                    Sessions.TryRemove((uint)process.Id, out _);
+                    Sessions.TryRemove(pid, out _);
+                    _failedPids[pid] = DateTime.UtcNow;
+                    Debug.WriteLine($"[API2:Tick] ✗ Init failed for PID {pid}, cooldown 10s");
                 }
+            }
+
+            // Clean up stale failed entries for processes that no longer exist
+            foreach (var pid in _failedPids.Keys)
+            {
+                try { Process.GetProcessById((int)pid); }
+                catch { _failedPids.TryRemove(pid, out _); }
             }
         }
         catch (Exception ex)
@@ -349,5 +416,10 @@ public class SynapseZAPI2
             Debug.WriteLine($"[SynapseZAPI2] Session removed for PID {pid}");
             SessionRemoved?.Invoke(session);
         }
+    }
+
+    public static bool TryGetSession(uint pid, out SynapseSession session)
+    {
+        return Sessions.TryGetValue(pid, out session!);
     }
 }

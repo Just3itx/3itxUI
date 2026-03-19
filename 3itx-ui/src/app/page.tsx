@@ -47,6 +47,7 @@ function defaultSettings(): ExecutorSettings {
     unlockFPS: false,
     debugMode: false,
     redirectConsole: false,
+    consoleRedirectMethod: "script",
     wordWrap: false,
     lineNumbers: true,
     bracketPairColorization: true,
@@ -319,8 +320,8 @@ export default function Home() {
 
   // Toggle console redirect on all connected instances when setting changes
   useEffect(() => {
-    fsBridge.setConsoleRedirect(settings.redirectConsole);
-  }, [settings.redirectConsole]);
+    fsBridge.setConsoleRedirect(settings.redirectConsole, settings.consoleRedirectMethod);
+  }, [settings.redirectConsole, settings.consoleRedirectMethod]);
 
   // Toggle LSP Connect on all connected instances when setting changes
   useEffect(() => {

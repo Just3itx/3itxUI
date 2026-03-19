@@ -36,7 +36,7 @@ const BOTTOM_ITEMS: { panel: PanelName; icon: React.ElementType; label: string }
 
 export default function Sidebar({ active, onSwitch }: SidebarProps) {
     return (
-        <nav className="glass w-[52px] border-r border-border flex flex-col items-center py-2 gap-1 shrink-0">
+        <nav className="w-[52px] bg-background border-r border-border flex flex-col items-center py-2 gap-1 shrink-0">
             {TOP_ITEMS.map(({ panel, icon: Icon, label }) => (
                 <Tooltip key={panel}>
                     <TooltipTrigger
@@ -44,7 +44,7 @@ export default function Sidebar({ active, onSwitch }: SidebarProps) {
                         className={cn(
                             "relative w-[38px] h-[38px] flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer",
                             active === panel
-                                ? "text-foreground"
+                                ? "text-foreground bg-white/[0.08]"
                                 : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
                         )}
                     >
@@ -69,7 +69,7 @@ export default function Sidebar({ active, onSwitch }: SidebarProps) {
                         className={cn(
                             "relative w-[38px] h-[38px] flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer",
                             active === panel
-                                ? "text-foreground"
+                                ? "text-foreground bg-white/[0.08]"
                                 : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
                         )}
                     >
